@@ -1,0 +1,22 @@
+{
+	"name": "@marianmeres/deno-build",
+	"version": "1.0.0",
+	"exports": "./deno-build.ts",
+	"tasks": {
+		"build:example": "deno run -A deno-build.ts --root example/src --outdir example/dist",
+		"release": "deno run -A jsr:@marianmeres/deno-release"
+	},
+	"imports": {
+		"@deno/emit": "jsr:@deno/emit@^0.46.0",
+		"@std/cli": "jsr:@std/cli@^1.0.24",
+		"@std/path": "jsr:@std/path@^1.1.3",
+		"@std/fs": "jsr:@std/fs@^1.0.20"
+	},
+	"exclude": ["example"],
+	"fmt": {
+		"useTabs": true,
+		"lineWidth": 90,
+		"indentWidth": 4,
+		"proseWrap": "preserve"
+	}
+}
