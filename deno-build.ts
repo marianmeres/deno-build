@@ -1,6 +1,6 @@
 import { bundle } from "@deno/emit";
 import { parseArgs } from "@std/cli/parse-args";
-import { resolve } from "@std/path";
+import { relative, resolve } from "@std/path";
 import { exists } from "@std/fs";
 
 const DEFAULT_ROOT = "src";
@@ -86,7 +86,7 @@ async function build(options: BuildOptions) {
 		await Deno.writeTextFile(outPath, result.code);
 
 		console.log(
-			`%c[${timestamp()}]%c  ✓ Built to ${outPath}`,
+			`%c[${timestamp()}]%c  ✓ Built to ${relative(Deno.cwd(), outPath)}`,
 			"color: gray",
 			"color: green"
 		);

@@ -1,6 +1,6 @@
 {
 	"name": "@marianmeres/deno-build",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"exports": "./deno-build.ts",
 	"tasks": {
 		"build:example": "deno run -A deno-build.ts --root example/src --outdir example/dist",
