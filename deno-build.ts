@@ -22,12 +22,14 @@ Options:
   --outfile, -f <file>   Output file name (default: "${DEFAULT_OUT_FILENAME}")
   --outdir, -o <path>    Output directory (default: "./dist")
   --watch, -w            Watch for changes and rebuild automatically
+  --watch-dir, -d <path> Additional directory to watch (can be repeated)
   --help, -h             Show this help message
 
 Examples:
   deno run -A jsr:@marianmeres/deno-build
   deno run -A jsr:@marianmeres/deno-build --root lib --entry index.ts --outfile app.js
   deno run -A jsr:@marianmeres/deno-build --outdir ./public/js --watch
+  deno run -A jsr:@marianmeres/deno-build --watch --watch-dir ../shared-lib -d ../utils
 
 Note: Automatically detects deno.json/deno.jsonc/import_map.json in cwd for import resolution.
 `);
@@ -38,6 +40,7 @@ interface BuildOptions {
 	entry: string;
 	outDir: string;
 	outFile: string;
+	watchDirs: string[];
 }
 
 async function findImportMap(): Promise<string | undefined> {
@@ -100,15 +103,18 @@ async function build(options: BuildOptions) {
 }
 
 async function watchAndRebuild(options: BuildOptions) {
-	const watchPath = resolve(Deno.cwd(), options.root);
+	const watchPaths = [
+		resolve(Deno.cwd(), options.root),
+		...options.watchDirs.map((d) => resolve(Deno.cwd(), d)),
+	];
 
 	console.log(
-		`\n%c[${timestamp()}]%c Watching ${watchPath} for changes...\n`,
+		`\n%c[${timestamp()}]%c Watching for changes:\n${watchPaths.map((p) => `    ${p}`).join("\n")}\n`,
 		"color: gray",
 		"color: cyan"
 	);
 
-	const watcher = Deno.watchFs(watchPath);
+	const watcher = Deno.watchFs(watchPaths);
 	let debounceTimeout: number | undefined;
 
 	for await (const event of watcher) {
@@ -146,8 +152,10 @@ async function main() {
 			o: "outdir",
 			h: "help",
 			w: "watch",
+			d: "watch-dir",
 		},
 		boolean: ["help", "watch"],
+		collect: ["watch-dir"],
 		default: {
 			root: DEFAULT_ROOT,
 			entry: DEFAULT_ENTRY_POINT,
@@ -166,6 +174,7 @@ async function main() {
 		entry: args.entry,
 		outDir: args.outdir,
 		outFile: args.outfile,
+		watchDirs: (args["watch-dir"] as string[]) || [],
 	};
 
 	await build(options);
