@@ -41,6 +41,8 @@ example/
 | `--outfile` | `-f` | string | `"bundle.js"` | Output filename |
 | `--outdir` | `-o` | string | `"./dist"` | Output directory |
 | `--watch` | `-w` | boolean | `false` | Enable watch mode |
+| `--watch-dir` | `-d` | string[] | `[]` | Additional directories to watch (repeatable) |
+| `--strict` | `-s` | boolean | `false` | Run `deno check` before bundling |
 | `--help` | `-h` | boolean | `false` | Show help |
 
 ### Usage Patterns
@@ -54,19 +56,37 @@ deno run -A jsr:@marianmeres/deno-build --root lib --entry index.ts --outfile ap
 
 # Watch mode
 deno run -A jsr:@marianmeres/deno-build --watch
+
+# Watch with additional directories
+deno run -A jsr:@marianmeres/deno-build --watch --watch-dir ../shared-lib -d ../utils
+
+# Strict mode (type checking)
+deno run -A jsr:@marianmeres/deno-build --strict
 ```
 
 ## Key Functions
 
+### `getPackageInfo(): Promise<PackageInfo | null>`
+- Returns `{ name, version }` from package metadata
+- For JSR: parses from `import.meta.url` (no network request)
+- For local: reads from `deno.json`
+- Returns `null` on any error (silent fail)
+
+### `typeCheck(entryPath: string): Promise<boolean>`
+- Runs `deno check` on the entry point via `Deno.Command`
+- Streams stdout/stderr to console (user sees errors)
+- Returns `true` if type checking passes, `false` otherwise
+
 ### `build(options: BuildOptions): Promise<void>`
 - Resolves paths relative to `Deno.cwd()`
+- If `strict` mode: runs `typeCheck()` before bundling, throws on failure
 - Auto-detects import map from `deno.json`, `deno.jsonc`, or `import_map.json`
 - Uses `@deno/emit` bundle() with `type: "module"`
 - Creates output directory if needed
 - Exits with code 1 if entry point not found
 
 ### `watchAndRebuild(options: BuildOptions): Promise<void>`
-- Watches source directory via `Deno.watchFs()`
+- Watches source directory + additional `watchDirs` via `Deno.watchFs()`
 - Debounces rebuilds (100ms)
 - Filters for `.ts`, `.tsx`, `.js`, `.jsx` files only
 - Continues watching after build errors
@@ -116,6 +136,7 @@ This ensures the tool works correctly when installed as a package and run from a
 - `--allow-write`: Write bundled output
 - `--allow-env`: Environment access (used by dependencies)
 - `--allow-net`: Fetch remote dependencies during bundling
+- `--allow-run`: Run `deno check` subprocess (only needed with `--strict`)
 
 Shorthand: `deno run -A` (all permissions)
 
@@ -126,3 +147,4 @@ To modify this tool:
 2. **Add source maps**: Handle `result.map` from bundle output
 3. **Custom transforms**: Process `result.code` before writing
 4. **Multiple entry points**: Loop over entries, call `build()` for each
+5. **Custom type checking**: Modify `typeCheck()` to use different compiler options

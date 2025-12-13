@@ -37,6 +37,12 @@ deno run -A jsr:@marianmeres/deno-build --root lib --entry index.ts --outfile ap
 # Watch mode for development
 deno run -A jsr:@marianmeres/deno-build --watch
 
+# Watch with additional directories (e.g., shared libraries)
+deno run -A jsr:@marianmeres/deno-build --watch --watch-dir ../shared-lib
+
+# Strict mode: fail on TypeScript type errors
+deno run -A jsr:@marianmeres/deno-build --strict
+
 # Output to different directory
 deno run -A jsr:@marianmeres/deno-build --outdir ./public/js
 ```
@@ -50,6 +56,8 @@ deno run -A jsr:@marianmeres/deno-build --outdir ./public/js
 | `--outfile` | `-f` | `bundle.js` | Output file name |
 | `--outdir` | `-o` | `./dist` | Output directory |
 | `--watch` | `-w` | `false` | Watch for changes and rebuild |
+| `--watch-dir` | `-d` | | Additional directory to watch (can be repeated) |
+| `--strict` | `-s` | `false` | Run type checking before bundling (fail on type errors) |
 | `--help` | `-h` | | Show help message |
 
 ## Example
@@ -92,9 +100,11 @@ Use in HTML:
 
 - Bundles TypeScript to browser-ready ES modules
 - Auto-detects `deno.json`, `deno.jsonc`, or `import_map.json` for import resolution
-- Watch mode with debounced rebuilds
+- Watch mode with debounced rebuilds (supports watching additional directories)
+- Strict mode: optional TypeScript type checking before bundling
 - Clear error messages when things go wrong
 - Zero configuration for standard project layouts
+- Displays package name and version on startup
 
 ## License
 
