@@ -5,7 +5,9 @@
 	"tasks": {
 		"build:example": "deno run -A deno-build.ts --root example/src --outdir example/dist",
 		"build:example2": "deno run -A deno-build.ts --root example/src --outdir example/dist --esbuild -f bundle2.js",
-		"release": "deno run -A jsr:@marianmeres/deno-release"
+		"release": "deno run -A jsr:@marianmeres/deno-release",
+		"rp": "deno task release -y && deno publish",
+		"rpm": "deno task release -y minor && deno publish"
 	},
 	"imports": {
 		"@deno/emit": "jsr:@deno/emit@^0.46.0",
