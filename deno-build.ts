@@ -55,6 +55,8 @@ Options:
   --watch, -w            Watch for changes and rebuild automatically
   --watch-dir, -d <path> Additional directory to watch (can be repeated)
   --strict, -s           Run type checking before bundling (fail on type errors)
+  --esbuild, -b          Use esbuild bundler (enables npm: specifier support)
+  --minify, -m           Minify the output bundle
   --help, -h             Show this help message
 
 Examples:
@@ -74,6 +76,8 @@ interface BuildOptions {
 	outFile: string;
 	watchDirs: string[];
 	strict: boolean;
+	useEsbuild: boolean;
+	minify: boolean;
 }
 
 async function typeCheck(entryPath: string): Promise<boolean> {
@@ -98,7 +102,7 @@ async function findImportMap(): Promise<string | undefined> {
 }
 
 async function build(options: BuildOptions) {
-	const { root, entry, outDir, outFile, strict } = options;
+	const { root, entry, outDir, outFile, strict, useEsbuild, minify } = options;
 	const entryPath = resolve(Deno.cwd(), root, entry);
 	const outDirPath = resolve(Deno.cwd(), outDir);
 	const outPath = resolve(outDirPath, outFile);
@@ -127,24 +131,45 @@ async function build(options: BuildOptions) {
 	// Auto-detect import map
 	const importMapPath = await findImportMap();
 
+	const bundlerLabel = useEsbuild ? " (esbuild)" : "";
+	const minifyLabel = minify ? " [minify]" : "";
 	console.log(
-		`%c[${timestamp()}]%c Building ${root}/${entry}...`,
+		`%c[${timestamp()}]%c Building ${root}/${entry}${bundlerLabel}${minifyLabel}...`,
 		"color: gray",
 		"color: inherit"
 	);
 
 	try {
-		const entryPoint = new URL(`file://${entryPath}`);
-		const bundleOptions: Parameters<typeof bundle>[1] = { type: "module" };
-
-		if (importMapPath) {
-			bundleOptions.importMap = new URL(`file://${importMapPath}`);
-		}
-
-		const result = await bundle(entryPoint, bundleOptions);
-
 		await Deno.mkdir(outDirPath, { recursive: true });
-		await Deno.writeTextFile(outPath, result.code);
+
+		if (useEsbuild) {
+			// Use esbuild bundler (supports npm: specifiers)
+			const { buildWithEsbuild } = await import("./esbuild-bundler.ts");
+			await buildWithEsbuild({
+				entryPath,
+				outPath,
+				importMapPath,
+				minify,
+			});
+		} else {
+			// Use @deno/emit bundler (default)
+			const entryPoint = new URL(`file://${entryPath}`);
+			const bundleOptions: Parameters<typeof bundle>[1] = { type: "module" };
+
+			if (importMapPath) {
+				bundleOptions.importMap = new URL(`file://${importMapPath}`);
+			}
+
+			const result = await bundle(entryPoint, bundleOptions);
+
+			let code = result.code;
+			if (minify) {
+				const { minifyCode } = await import("./esbuild-bundler.ts");
+				code = await minifyCode(code);
+			}
+
+			await Deno.writeTextFile(outPath, code);
+		}
 
 		console.log(
 			`%c[${timestamp()}]%c  ✓ ${relative(Deno.cwd(), outPath)}`,
@@ -225,8 +250,10 @@ async function main() {
 			w: "watch",
 			d: "watch-dir",
 			s: "strict",
+			b: "esbuild",
+			m: "minify",
 		},
-		boolean: ["help", "watch", "strict"],
+		boolean: ["help", "watch", "strict", "esbuild", "minify"],
 		collect: ["watch-dir"],
 		default: {
 			root: DEFAULT_ROOT,
@@ -248,6 +275,8 @@ async function main() {
 		outFile: args.outfile,
 		watchDirs: (args["watch-dir"] as string[]) || [],
 		strict: args.strict,
+		useEsbuild: args.esbuild,
+		minify: args.minify,
 	};
 
 	await build(options);

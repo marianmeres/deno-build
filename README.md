@@ -45,6 +45,15 @@ deno run -A jsr:@marianmeres/deno-build --strict
 
 # Output to different directory
 deno run -A jsr:@marianmeres/deno-build --outdir ./public/js
+
+# Use esbuild bundler (enables npm: specifier support)
+deno run -A jsr:@marianmeres/deno-build --esbuild
+
+# Minify the output bundle
+deno run -A jsr:@marianmeres/deno-build --minify
+
+# Combine flags: esbuild with minification
+deno run -A jsr:@marianmeres/deno-build --esbuild --minify
 ```
 
 ### Options
@@ -58,6 +67,8 @@ deno run -A jsr:@marianmeres/deno-build --outdir ./public/js
 | `--watch` | `-w` | `false` | Watch for changes and rebuild |
 | `--watch-dir` | `-d` | | Additional directory to watch (can be repeated) |
 | `--strict` | `-s` | `false` | Run type checking before bundling (fail on type errors) |
+| `--esbuild` | `-b` | `false` | Use esbuild bundler (enables npm: specifier support) |
+| `--minify` | `-m` | `false` | Minify the output bundle |
 | `--help` | `-h` | | Show help message |
 
 ## Example
@@ -102,6 +113,8 @@ Use in HTML:
 - Auto-detects `deno.json`, `deno.jsonc`, or `import_map.json` for import resolution
 - Watch mode with debounced rebuilds (supports watching additional directories)
 - Strict mode: optional TypeScript type checking before bundling
+- Alternative esbuild bundler with npm package support (`npm:` specifiers)
+- Output minification (works with both bundlers)
 - Clear error messages when things go wrong
 - Zero configuration for standard project layouts
 - Displays package name and version on startup

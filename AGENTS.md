@@ -13,7 +13,8 @@ Machine-readable documentation for AI agents working with this codebase.
 ## Architecture
 
 ```
-deno-build.ts          # Single-file CLI tool (main entry)
+deno-build.ts          # Main CLI tool entry point
+esbuild-bundler.ts     # Alternative esbuild bundler (supports npm: specifiers)
 example/
   src/mod.ts           # Example entry point
   src/utils.ts         # Example utilities
@@ -25,10 +26,12 @@ example/
 
 | Package | Purpose |
 |---------|---------|
-| `@deno/emit` | TypeScript bundling via `bundle()` function |
+| `@deno/emit` | TypeScript bundling via `bundle()` function (default bundler) |
 | `@std/cli` | CLI argument parsing via `parseArgs()` |
 | `@std/path` | Path resolution via `resolve()` |
 | `@std/fs` | File existence checks via `exists()` |
+| `esbuild` | Alternative bundler with npm support (lazy-loaded) |
+| `@luca/esbuild-deno-loader` | Deno plugin for esbuild (lazy-loaded) |
 
 ## CLI Interface
 
@@ -43,6 +46,8 @@ example/
 | `--watch` | `-w` | boolean | `false` | Enable watch mode |
 | `--watch-dir` | `-d` | string[] | `[]` | Additional directories to watch (repeatable) |
 | `--strict` | `-s` | boolean | `false` | Run `deno check` before bundling |
+| `--esbuild` | `-b` | boolean | `false` | Use esbuild bundler (enables npm: specifier support) |
+| `--minify` | `-m` | boolean | `false` | Minify the output bundle |
 | `--help` | `-h` | boolean | `false` | Show help |
 
 ### Usage Patterns
@@ -62,6 +67,15 @@ deno run -A jsr:@marianmeres/deno-build --watch --watch-dir ../shared-lib -d ../
 
 # Strict mode (type checking)
 deno run -A jsr:@marianmeres/deno-build --strict
+
+# Esbuild bundler (supports npm: specifiers)
+deno run -A jsr:@marianmeres/deno-build --esbuild
+
+# Minify output
+deno run -A jsr:@marianmeres/deno-build --minify
+
+# Esbuild with minification
+deno run -A jsr:@marianmeres/deno-build --esbuild --minify
 ```
 
 ## Key Functions
@@ -81,9 +95,21 @@ deno run -A jsr:@marianmeres/deno-build --strict
 - Resolves paths relative to `Deno.cwd()`
 - If `strict` mode: runs `typeCheck()` before bundling, throws on failure
 - Auto-detects import map from `deno.json`, `deno.jsonc`, or `import_map.json`
-- Uses `@deno/emit` bundle() with `type: "module"`
+- If `useEsbuild`: dynamically imports and uses `buildWithEsbuild()` from `esbuild-bundler.ts`
+- Otherwise: uses `@deno/emit` bundle() with `type: "module"`
+- If `minify` with @deno/emit: post-processes output with `minifyCode()` from `esbuild-bundler.ts`
 - Creates output directory if needed
 - Exits with code 1 if entry point not found
+
+### `buildWithEsbuild(options: EsbuildOptions): Promise<void>` (esbuild-bundler.ts)
+- Uses esbuild with `@luca/esbuild-deno-loader` plugins
+- Supports Deno import maps, JSR packages, and npm: specifiers
+- Native minification via esbuild's `minify` option
+- Calls `esbuild.stop()` after bundling to clean up
+
+### `minifyCode(code: string): Promise<string>` (esbuild-bundler.ts)
+- Uses esbuild's `transform()` API for minification
+- Called by @deno/emit path when `--minify` flag is used
 
 ### `watchAndRebuild(options: BuildOptions): Promise<void>`
 - Watches source directory + additional `watchDirs` via `Deno.watchFs()`
@@ -125,7 +151,8 @@ This ensures the tool works correctly when installed as a package and run from a
 ```json
 {
   "tasks": {
-    "build:example": "deno run -A deno-build.ts --root example/src --outdir example/dist"
+    "build:example": "deno run -A deno-build.ts --root example/src --outdir example/dist",
+    "build:example2": "deno run -A deno-build.ts --root example/src --outdir example/dist --esbuild -f bundle2.js"
   }
 }
 ```
@@ -143,8 +170,8 @@ Shorthand: `deno run -A` (all permissions)
 ## Extension Points
 
 To modify this tool:
-1. **Add minification**: Pass additional options to `bundle()` or post-process `result.code`
-2. **Add source maps**: Handle `result.map` from bundle output
-3. **Custom transforms**: Process `result.code` before writing
-4. **Multiple entry points**: Loop over entries, call `build()` for each
-5. **Custom type checking**: Modify `typeCheck()` to use different compiler options
+1. **Add source maps**: Handle `result.map` from bundle output
+2. **Custom transforms**: Process `result.code` before writing
+3. **Multiple entry points**: Loop over entries, call `build()` for each
+4. **Custom type checking**: Modify `typeCheck()` to use different compiler options
+5. **Additional esbuild options**: Extend `buildWithEsbuild()` to support more esbuild features
