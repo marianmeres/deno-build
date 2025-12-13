@@ -1,7 +1,38 @@
 import { bundle } from "@deno/emit";
 import { parseArgs } from "@std/cli/parse-args";
-import { relative, resolve } from "@std/path";
+import { fromFileUrl, relative, resolve } from "@std/path";
 import { exists } from "@std/fs";
+
+interface PackageInfo {
+	name: string;
+	version: string;
+}
+
+async function getPackageInfo(): Promise<PackageInfo | null> {
+	try {
+		const baseUrl = import.meta.url;
+
+		// JSR URL format: https://jsr.io/@scope/name/version/file.ts
+		const jsrMatch = baseUrl.match(
+			/^https:\/\/jsr\.io\/(@[^/]+\/[^/]+)\/([^/]+)\//
+		);
+		if (jsrMatch) {
+			return { name: jsrMatch[1], version: jsrMatch[2] };
+		}
+
+		// Local: read from deno.json
+		if (baseUrl.startsWith("file://")) {
+			const denoJsonUrl = new URL("deno.json", baseUrl).href;
+			const content = await Deno.readTextFile(fromFileUrl(denoJsonUrl));
+			const json = JSON.parse(content);
+			return { name: json.name, version: json.version };
+		}
+
+		return null;
+	} catch {
+		return null;
+	}
+}
 
 const DEFAULT_ROOT = "src";
 const DEFAULT_ENTRY_POINT = "mod.ts";
@@ -23,6 +54,7 @@ Options:
   --outdir, -o <path>    Output directory (default: "./dist")
   --watch, -w            Watch for changes and rebuild automatically
   --watch-dir, -d <path> Additional directory to watch (can be repeated)
+  --strict, -s           Run type checking before bundling (fail on type errors)
   --help, -h             Show this help message
 
 Examples:
@@ -41,6 +73,17 @@ interface BuildOptions {
 	outDir: string;
 	outFile: string;
 	watchDirs: string[];
+	strict: boolean;
+}
+
+async function typeCheck(entryPath: string): Promise<boolean> {
+	const command = new Deno.Command("deno", {
+		args: ["check", entryPath],
+		stdout: "inherit",
+		stderr: "inherit",
+	});
+	const { success } = await command.output();
+	return success;
 }
 
 async function findImportMap(): Promise<string | undefined> {
@@ -55,15 +98,30 @@ async function findImportMap(): Promise<string | undefined> {
 }
 
 async function build(options: BuildOptions) {
-	const { root, entry, outDir, outFile } = options;
+	const { root, entry, outDir, outFile, strict } = options;
 	const entryPath = resolve(Deno.cwd(), root, entry);
 	const outDirPath = resolve(Deno.cwd(), outDir);
 	const outPath = resolve(outDirPath, outFile);
 
 	// Check if entry point exists
 	if (!(await exists(entryPath))) {
-		console.error(`%c[${timestamp()}] Error: Entry point not found: ${entryPath}`, "color: red");
+		console.error(
+			`%c[${timestamp()}] Error: Entry point not found: ${entryPath}`,
+			"color: red"
+		);
 		Deno.exit(1);
+	}
+
+	// Run type checking if strict mode is enabled
+	if (strict) {
+		console.log(
+			`%c[${timestamp()}]%c Type checking ${root}/${entry}...`,
+			"color: gray",
+			"color: inherit"
+		);
+		if (!(await typeCheck(entryPath))) {
+			throw new Error("Type checking failed");
+		}
 	}
 
 	// Auto-detect import map
@@ -89,13 +147,15 @@ async function build(options: BuildOptions) {
 		await Deno.writeTextFile(outPath, result.code);
 
 		console.log(
-			`%c[${timestamp()}]%c  ✓ Built to ${relative(Deno.cwd(), outPath)}`,
+			`%c[${timestamp()}]%c  ✓ ${relative(Deno.cwd(), outPath)}`,
 			"color: gray",
 			"color: green"
 		);
 	} catch (error) {
 		console.error(
-			`%c[${timestamp()}] Build failed: ${error instanceof Error ? error.message : error}`,
+			`%c[${timestamp()}] Build failed: ${
+				error instanceof Error ? error.message : error
+			}`,
 			"color: red"
 		);
 		throw error;
@@ -109,7 +169,9 @@ async function watchAndRebuild(options: BuildOptions) {
 	];
 
 	console.log(
-		`\n%c[${timestamp()}]%c Watching for changes:\n${watchPaths.map((p) => `    ${p}`).join("\n")}\n`,
+		`\n%c[${timestamp()}]%c Watching for changes:\n${watchPaths
+			.map((p) => `    ${p}`)
+			.join("\n")}\n`,
 		"color: gray",
 		"color: cyan"
 	);
@@ -122,7 +184,11 @@ async function watchAndRebuild(options: BuildOptions) {
 
 		// Skip non-ts files
 		const hasRelevantFile = event.paths.some(
-			(p) => p.endsWith(".ts") || p.endsWith(".tsx") || p.endsWith(".js") || p.endsWith(".jsx")
+			(p) =>
+				p.endsWith(".ts") ||
+				p.endsWith(".tsx") ||
+				p.endsWith(".js") ||
+				p.endsWith(".jsx")
 		);
 		if (!hasRelevantFile) continue;
 
@@ -143,6 +209,11 @@ async function watchAndRebuild(options: BuildOptions) {
 }
 
 async function main() {
+	const pkg = await getPackageInfo();
+	if (pkg) {
+		console.log(`%c${pkg.name} v${pkg.version}`, "color: cyan");
+	}
+
 	const args = parseArgs(Deno.args, {
 		string: ["root", "entry", "outfile", "outdir"],
 		alias: {
@@ -153,8 +224,9 @@ async function main() {
 			h: "help",
 			w: "watch",
 			d: "watch-dir",
+			s: "strict",
 		},
-		boolean: ["help", "watch"],
+		boolean: ["help", "watch", "strict"],
 		collect: ["watch-dir"],
 		default: {
 			root: DEFAULT_ROOT,
@@ -175,6 +247,7 @@ async function main() {
 		outDir: args.outdir,
 		outFile: args.outfile,
 		watchDirs: (args["watch-dir"] as string[]) || [],
+		strict: args.strict,
 	};
 
 	await build(options);
