@@ -5,16 +5,21 @@ Machine-readable documentation for AI agents working with this codebase.
 ## Package Overview
 
 - **Name**: `@marianmeres/deno-build`
-- **Type**: CLI tool
+- **Type**: CLI tool + Library
 - **Runtime**: Deno
 - **Purpose**: Bundle Deno TypeScript sources into vanilla ES module JavaScript for browser use
-- **Entry point**: `deno-build.ts`
+- **CLI entry point**: `cli.ts`
+- **Library entry point**: `src/mod.ts`
 
 ## Architecture
 
 ```
-deno-build.ts          # Main CLI tool entry point
-esbuild-bundler.ts     # Alternative esbuild bundler (supports npm: specifiers)
+cli.ts                 # CLI entry point (argument parsing, main())
+src/
+  mod.ts               # Library entry point (re-exports all public APIs)
+  build.ts             # Core build logic (build, watchAndRebuild)
+  esbuild-bundler.ts   # Alternative esbuild bundler (supports npm: specifiers)
+  utils.ts             # Types, constants, and utility functions
 example/
   src/mod.ts           # Example entry point
   src/utils.ts         # Example utilities
@@ -78,48 +83,73 @@ deno run -A jsr:@marianmeres/deno-build --minify
 deno run -A jsr:@marianmeres/deno-build --esbuild --minify
 ```
 
+### Library Usage
+
+```typescript
+import { build, BuildOptions } from "jsr:@marianmeres/deno-build/lib";
+
+const options: BuildOptions = {
+  root: "src",
+  entry: "mod.ts",
+  outDir: "./dist",
+  outFile: "bundle.js",
+  watchDirs: [],
+  strict: false,
+  useEsbuild: false,
+  minify: false,
+};
+
+await build(options);
+```
+
 ## Key Functions
 
-### `getPackageInfo(): Promise<PackageInfo | null>`
+### src/utils.ts
+
+#### `getPackageInfo(): Promise<PackageInfo | null>`
 - Returns `{ name, version }` from package metadata
 - For JSR: parses from `import.meta.url` (no network request)
 - For local: reads from `deno.json`
 - Returns `null` on any error (silent fail)
 
-### `typeCheck(entryPath: string): Promise<boolean>`
+#### `typeCheck(entryPath: string): Promise<boolean>`
 - Runs `deno check` on the entry point via `Deno.Command`
 - Streams stdout/stderr to console (user sees errors)
 - Returns `true` if type checking passes, `false` otherwise
 
-### `build(options: BuildOptions): Promise<void>`
+#### `findImportMap(): Promise<string | undefined>`
+- Searches cwd for: `deno.json` > `deno.jsonc` > `import_map.json`
+- Returns absolute path or undefined
+
+### src/build.ts
+
+#### `build(options: BuildOptions): Promise<void>`
 - Resolves paths relative to `Deno.cwd()`
 - If `strict` mode: runs `typeCheck()` before bundling, throws on failure
 - Auto-detects import map from `deno.json`, `deno.jsonc`, or `import_map.json`
-- If `useEsbuild`: dynamically imports and uses `buildWithEsbuild()` from `esbuild-bundler.ts`
+- If `useEsbuild`: dynamically imports and uses `buildWithEsbuild()` from `./esbuild-bundler.ts`
 - Otherwise: uses `@deno/emit` bundle() with `type: "module"`
-- If `minify` with @deno/emit: post-processes output with `minifyCode()` from `esbuild-bundler.ts`
+- If `minify` with @deno/emit: post-processes output with `minifyCode()` from `./esbuild-bundler.ts`
 - Creates output directory if needed
 - Exits with code 1 if entry point not found
 
-### `buildWithEsbuild(options: EsbuildOptions): Promise<void>` (esbuild-bundler.ts)
-- Uses esbuild with `@luca/esbuild-deno-loader` plugins
-- Supports Deno import maps, JSR packages, and npm: specifiers
-- Native minification via esbuild's `minify` option
-- Calls `esbuild.stop()` after bundling to clean up
-
-### `minifyCode(code: string): Promise<string>` (esbuild-bundler.ts)
-- Uses esbuild's `transform()` API for minification
-- Called by @deno/emit path when `--minify` flag is used
-
-### `watchAndRebuild(options: BuildOptions): Promise<void>`
+#### `watchAndRebuild(options: BuildOptions): Promise<void>`
 - Watches source directory + additional `watchDirs` via `Deno.watchFs()`
 - Debounces rebuilds (100ms)
 - Filters for `.ts`, `.tsx`, `.js`, `.jsx` files only
 - Continues watching after build errors
 
-### `findImportMap(): Promise<string | undefined>`
-- Searches cwd for: `deno.json` > `deno.jsonc` > `import_map.json`
-- Returns absolute path or undefined
+### src/esbuild-bundler.ts
+
+#### `buildWithEsbuild(options: EsbuildOptions): Promise<void>`
+- Uses esbuild with `@luca/esbuild-deno-loader` plugins
+- Supports Deno import maps, JSR packages, and npm: specifiers
+- Native minification via esbuild's `minify` option
+- Calls `esbuild.stop()` after bundling to clean up
+
+#### `minifyCode(code: string): Promise<string>`
+- Uses esbuild's `transform()` API for minification
+- Called by @deno/emit path when `--minify` flag is used
 
 ## Path Resolution
 
@@ -151,8 +181,8 @@ This ensures the tool works correctly when installed as a package and run from a
 ```json
 {
   "tasks": {
-    "build:example": "deno run -A deno-build.ts --root example/src --outdir example/dist",
-    "build:example2": "deno run -A deno-build.ts --root example/src --outdir example/dist --esbuild -f bundle2.js"
+    "build:example": "deno run -A cli.ts --root example/src --outdir example/dist",
+    "build:example2": "deno run -A cli.ts --root example/src --outdir example/dist --esbuild -f bundle2.js"
   }
 }
 ```

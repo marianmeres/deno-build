@@ -1,13 +1,13 @@
 # @marianmeres/deno-build
 
-A quick-and-dirty CLI tool to bundle Deno TypeScript sources into vanilla JavaScript
-for browser use.
+A quick-and-dirty CLI tool and library to bundle Deno TypeScript sources into vanilla
+JavaScript for browser use.
 
 ## Motivation
 
 When prototyping web applications, I often write utility modules in Deno/TypeScript
-for their excellent DX. But when it comes to including these modules in a simple HTML 
-file for quick prototyping, there's friction: browsers don't understand TypeScript or 
+for their excellent DX. But when it comes to including these modules in a simple HTML
+file for quick prototyping, there's friction: browsers don't understand TypeScript or
 Deno's import maps.
 
 This tool bridges that gap. It takes your Deno TS source and bundles it into a single
@@ -25,7 +25,7 @@ deno run -A jsr:@marianmeres/deno-build
 deno add jsr:@marianmeres/deno-build
 ```
 
-## Usage
+## CLI Usage
 
 ```bash
 # Bundle src/mod.ts -> dist/bundle.js (defaults)
@@ -107,6 +107,54 @@ Use in HTML:
 </script>
 ```
 
+## Library Usage
+
+You can also use `deno-build` programmatically:
+
+```typescript
+import { build, BuildOptions } from "jsr:@marianmeres/deno-build/lib";
+
+const options: BuildOptions = {
+  root: "src",
+  entry: "mod.ts",
+  outDir: "./dist",
+  outFile: "bundle.js",
+  watchDirs: [],
+  strict: false,
+  useEsbuild: false,
+  minify: false,
+};
+
+await build(options);
+```
+
+### Exports
+
+```typescript
+// Types
+export interface PackageInfo { name: string; version: string; }
+export interface BuildOptions { root, entry, outDir, outFile, watchDirs, strict, useEsbuild, minify }
+export interface EsbuildOptions { entryPath, outPath, importMapPath?, minify? }
+
+// Core functions
+export function build(options: BuildOptions): Promise<void>
+export function watchAndRebuild(options: BuildOptions): Promise<void>
+
+// Esbuild functions
+export function buildWithEsbuild(options: EsbuildOptions): Promise<void>
+export function minifyCode(code: string): Promise<string>
+
+// Utilities
+export function getPackageInfo(): Promise<PackageInfo | null>
+export function findImportMap(): Promise<string | undefined>
+export function typeCheck(entryPath: string): Promise<boolean>
+
+// Constants
+export const DEFAULT_ROOT: string        // "src"
+export const DEFAULT_ENTRY_POINT: string // "mod.ts"
+export const DEFAULT_OUT_FILENAME: string // "bundle.js"
+```
+
 ## Features
 
 - Bundles TypeScript to browser-ready ES modules
@@ -118,6 +166,7 @@ Use in HTML:
 - Clear error messages when things go wrong
 - Zero configuration for standard project layouts
 - Displays package name and version on startup
+- **Dual-use**: works as both CLI tool and importable library
 
 ## License
 
