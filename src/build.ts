@@ -3,7 +3,32 @@ import { relative, resolve } from "@std/path";
 import { exists } from "@std/fs";
 import { BuildOptions, findImportMap, timestamp, typeCheck } from "./utils.ts";
 
-export async function build(options: BuildOptions) {
+/**
+ * Bundles TypeScript source files into a single JavaScript ES module.
+ *
+ * Uses @deno/emit by default, or esbuild when `useEsbuild` option is enabled.
+ * Automatically detects import maps from deno.json, deno.jsonc, or import_map.json.
+ *
+ * @param options - Build configuration options
+ * @throws Error if type checking fails (when strict mode is enabled)
+ * @throws Error if bundling fails
+ * @example
+ * ```ts
+ * import { build } from "jsr:@marianmeres/deno-build/lib";
+ *
+ * await build({
+ *   root: "src",
+ *   entry: "mod.ts",
+ *   outDir: "./dist",
+ *   outFile: "bundle.js",
+ *   watchDirs: [],
+ *   strict: false,
+ *   useEsbuild: false,
+ *   minify: false,
+ * });
+ * ```
+ */
+export async function build(options: BuildOptions): Promise<void> {
 	const { root, entry, outDir, outFile, strict, useEsbuild, minify } = options;
 	const entryPath = resolve(Deno.cwd(), root, entry);
 	const outDirPath = resolve(Deno.cwd(), outDir);
@@ -89,7 +114,38 @@ export async function build(options: BuildOptions) {
 	}
 }
 
-export async function watchAndRebuild(options: BuildOptions) {
+/**
+ * Watches source directories for changes and triggers rebuilds automatically.
+ *
+ * Monitors the source root directory and any additional directories specified
+ * in `watchDirs`. Rebuilds are debounced (100ms) to prevent excessive builds
+ * during rapid file changes. Only `.ts`, `.tsx`, `.js`, and `.jsx` files
+ * trigger rebuilds.
+ *
+ * @param options - Build configuration options (same as {@link build})
+ * @example
+ * ```ts
+ * import { build, watchAndRebuild } from "jsr:@marianmeres/deno-build/lib";
+ *
+ * const options = {
+ *   root: "src",
+ *   entry: "mod.ts",
+ *   outDir: "./dist",
+ *   outFile: "bundle.js",
+ *   watchDirs: ["../shared-lib"],
+ *   strict: false,
+ *   useEsbuild: false,
+ *   minify: false,
+ * };
+ *
+ * // Initial build
+ * await build(options);
+ *
+ * // Start watching
+ * await watchAndRebuild(options);
+ * ```
+ */
+export async function watchAndRebuild(options: BuildOptions): Promise<never> {
 	const watchPaths = [
 		resolve(Deno.cwd(), options.root),
 		...options.watchDirs.map((d) => resolve(Deno.cwd(), d)),
@@ -133,4 +189,8 @@ export async function watchAndRebuild(options: BuildOptions) {
 			);
 		}, 100);
 	}
+
+	// This line is technically unreachable since the watcher runs forever,
+	// but TypeScript needs it for the Promise<never> return type
+	throw new Error("Watcher unexpectedly terminated");
 }
