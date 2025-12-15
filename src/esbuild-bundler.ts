@@ -13,6 +13,8 @@ export interface EsbuildOptions {
 	importMapPath?: string;
 	/** Whether to minify the output */
 	minify?: boolean;
+	/** Skip writing to file, only return bundled code */
+	skipWrite?: boolean;
 }
 
 /**
@@ -22,31 +24,48 @@ export interface EsbuildOptions {
  * JSR packages, and npm: specifiers. Output is an ES module.
  *
  * @param options - Esbuild configuration options
+ * @returns The bundled code as a string
  * @example
  * ```ts
  * import { buildWithEsbuild } from "jsr:@marianmeres/deno-build/lib";
  *
- * await buildWithEsbuild({
+ * // Write to file and get code
+ * const code = await buildWithEsbuild({
  *   entryPath: "/path/to/src/mod.ts",
  *   outPath: "/path/to/dist/bundle.js",
  *   importMapPath: "/path/to/deno.json",
  *   minify: true,
  * });
+ *
+ * // Get code only without writing to file
+ * const codeOnly = await buildWithEsbuild({
+ *   entryPath: "/path/to/src/mod.ts",
+ *   outPath: "/path/to/dist/bundle.js",
+ *   skipWrite: true,
+ * });
  * ```
  */
-export async function buildWithEsbuild(options: EsbuildOptions): Promise<void> {
-	const { entryPath, outPath, importMapPath, minify } = options;
+export async function buildWithEsbuild(options: EsbuildOptions): Promise<string> {
+	const { entryPath, outPath, importMapPath, minify, skipWrite } = options;
 
-	await esbuild.build({
+	const result = await esbuild.build({
 		plugins: [...denoPlugins({ configPath: importMapPath })],
 		entryPoints: [entryPath],
-		outfile: outPath,
+		outfile: skipWrite ? undefined : outPath,
+		write: !skipWrite,
 		bundle: true,
 		format: "esm",
 		minify: minify ?? false,
 	});
 
 	esbuild.stop();
+
+	if (skipWrite) {
+		return result.outputFiles![0].text;
+	}
+
+	// When writing to file, read it back to return the code
+	return await Deno.readTextFile(outPath);
 }
 
 /**

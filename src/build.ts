@@ -10,13 +10,15 @@ import { BuildOptions, findImportMap, timestamp, typeCheck } from "./utils.ts";
  * Automatically detects import maps from deno.json, deno.jsonc, or import_map.json.
  *
  * @param options - Build configuration options
+ * @returns The bundled code as a string
  * @throws Error if type checking fails (when strict mode is enabled)
  * @throws Error if bundling fails
  * @example
  * ```ts
  * import { build } from "jsr:@marianmeres/deno-build/lib";
  *
- * await build({
+ * // Write to file and get code
+ * const code = await build({
  *   root: "src",
  *   entry: "mod.ts",
  *   outDir: "./dist",
@@ -26,10 +28,23 @@ import { BuildOptions, findImportMap, timestamp, typeCheck } from "./utils.ts";
  *   useEsbuild: false,
  *   minify: false,
  * });
+ *
+ * // Get code only without writing to file
+ * const codeOnly = await build({
+ *   root: "src",
+ *   entry: "mod.ts",
+ *   outDir: "./dist",
+ *   outFile: "bundle.js",
+ *   watchDirs: [],
+ *   strict: false,
+ *   useEsbuild: false,
+ *   minify: false,
+ *   skipWrite: true,
+ * });
  * ```
  */
-export async function build(options: BuildOptions): Promise<void> {
-	const { root, entry, outDir, outFile, strict, useEsbuild, minify } = options;
+export async function build(options: BuildOptions): Promise<string> {
+	const { root, entry, outDir, outFile, strict, useEsbuild, minify, skipWrite } = options;
 	const entryPath = resolve(Deno.cwd(), root, entry);
 	const outDirPath = resolve(Deno.cwd(), outDir);
 	const outPath = resolve(outDirPath, outFile);
@@ -67,16 +82,20 @@ export async function build(options: BuildOptions): Promise<void> {
 	);
 
 	try {
-		await Deno.mkdir(outDirPath, { recursive: true });
+		let code: string;
 
 		if (useEsbuild) {
 			// Use esbuild bundler (supports npm: specifiers)
+			if (!skipWrite) {
+				await Deno.mkdir(outDirPath, { recursive: true });
+			}
 			const { buildWithEsbuild } = await import("./esbuild-bundler.ts");
-			await buildWithEsbuild({
+			code = await buildWithEsbuild({
 				entryPath,
 				outPath,
 				importMapPath,
 				minify,
+				skipWrite,
 			});
 		} else {
 			// Use @deno/emit bundler (default)
@@ -89,20 +108,27 @@ export async function build(options: BuildOptions): Promise<void> {
 
 			const result = await bundle(entryPoint, bundleOptions);
 
-			let code = result.code;
+			code = result.code;
 			if (minify) {
 				const { minifyCode } = await import("./esbuild-bundler.ts");
 				code = await minifyCode(code);
 			}
 
-			await Deno.writeTextFile(outPath, code);
+			if (!skipWrite) {
+				await Deno.mkdir(outDirPath, { recursive: true });
+				await Deno.writeTextFile(outPath, code);
+			}
 		}
 
-		console.log(
-			`%c[${timestamp()}]%c  ✓ ${relative(Deno.cwd(), outPath)}`,
-			"color: gray",
-			"color: green"
-		);
+		if (!skipWrite) {
+			console.log(
+				`%c[${timestamp()}]%c  ✓ ${relative(Deno.cwd(), outPath)}`,
+				"color: gray",
+				"color: green"
+			);
+		}
+
+		return code;
 	} catch (error) {
 		console.error(
 			`%c[${timestamp()}] Build failed: ${

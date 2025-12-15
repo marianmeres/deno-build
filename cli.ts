@@ -3,7 +3,7 @@ import {
 	build,
 	watchAndRebuild,
 	getPackageInfo,
-	BuildOptions,
+	type BuildOptions,
 	DEFAULT_ROOT,
 	DEFAULT_ENTRY_POINT,
 	DEFAULT_OUT_FILENAME,
@@ -25,6 +25,7 @@ Options:
   --strict, -s           Run type checking before bundling (fail on type errors)
   --esbuild, -b          Use esbuild bundler (enables npm: specifier support)
   --minify, -m           Minify the output bundle
+  --skip-write, -k       Output bundled code to stdout instead of writing to file
   --help, -h             Show this help message
 
 Examples:
@@ -56,8 +57,9 @@ async function main() {
 			s: "strict",
 			b: "esbuild",
 			m: "minify",
+			k: "skip-write",
 		},
-		boolean: ["help", "watch", "strict", "esbuild", "minify"],
+		boolean: ["help", "watch", "strict", "esbuild", "minify", "skip-write"],
 		collect: ["watch-dir"],
 		default: {
 			root: DEFAULT_ROOT,
@@ -72,6 +74,8 @@ async function main() {
 		Deno.exit(0);
 	}
 
+	const skipWrite = args["skip-write"];
+
 	const options: BuildOptions = {
 		root: args.root,
 		entry: args.entry,
@@ -81,11 +85,14 @@ async function main() {
 		strict: args.strict,
 		useEsbuild: args.esbuild,
 		minify: args.minify,
+		skipWrite,
 	};
 
-	await build(options);
+	const code = await build(options);
 
-	if (args.watch) {
+	if (skipWrite) {
+		console.log(code);
+	} else if (args.watch) {
 		await watchAndRebuild(options);
 	}
 }

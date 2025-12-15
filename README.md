@@ -69,6 +69,7 @@ deno run -A jsr:@marianmeres/deno-build --esbuild --minify
 | `--strict` | `-s` | `false` | Run type checking before bundling (fail on type errors) |
 | `--esbuild` | `-b` | `false` | Use esbuild bundler (enables npm: specifier support) |
 | `--minify` | `-m` | `false` | Minify the output bundle |
+| `--skip-write` | `-k` | `false` | Output bundled code to stdout instead of writing to file |
 | `--help` | `-h` | | Show help message |
 
 ## Example
@@ -125,7 +126,11 @@ const options: BuildOptions = {
   minify: false,
 };
 
-await build(options);
+// Write to file and get bundled code
+const code = await build(options);
+
+// Get bundled code only (no file written)
+const codeOnly = await build({ ...options, skipWrite: true });
 ```
 
 ### Exports
@@ -133,15 +138,15 @@ await build(options);
 ```typescript
 // Types
 export interface PackageInfo { name: string; version: string; }
-export interface BuildOptions { root, entry, outDir, outFile, watchDirs, strict, useEsbuild, minify }
-export interface EsbuildOptions { entryPath, outPath, importMapPath?, minify? }
+export interface BuildOptions { root, entry, outDir, outFile, watchDirs, strict, useEsbuild, minify, skipWrite? }
+export interface EsbuildOptions { entryPath, outPath, importMapPath?, minify?, skipWrite? }
 
 // Core functions
-export function build(options: BuildOptions): Promise<void>
-export function watchAndRebuild(options: BuildOptions): Promise<void>
+export function build(options: BuildOptions): Promise<string>
+export function watchAndRebuild(options: BuildOptions): Promise<never>
 
 // Esbuild functions
-export function buildWithEsbuild(options: EsbuildOptions): Promise<void>
+export function buildWithEsbuild(options: EsbuildOptions): Promise<string>
 export function minifyCode(code: string): Promise<string>
 
 // Utilities

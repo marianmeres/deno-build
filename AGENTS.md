@@ -53,6 +53,7 @@ example/
 | `--strict` | `-s` | boolean | `false` | Run `deno check` before bundling |
 | `--esbuild` | `-b` | boolean | `false` | Use esbuild bundler (enables npm: specifier support) |
 | `--minify` | `-m` | boolean | `false` | Minify the output bundle |
+| `--skip-write` | `-k` | boolean | `false` | Output bundled code to stdout instead of writing to file |
 | `--help` | `-h` | boolean | `false` | Show help |
 
 ### Usage Patterns
@@ -81,6 +82,9 @@ deno run -A jsr:@marianmeres/deno-build --minify
 
 # Esbuild with minification
 deno run -A jsr:@marianmeres/deno-build --esbuild --minify
+
+# Output to stdout instead of file
+deno run -A jsr:@marianmeres/deno-build --skip-write
 ```
 
 ### Library Usage
@@ -99,7 +103,11 @@ const options: BuildOptions = {
   minify: false,
 };
 
-await build(options);
+// Write to file and get bundled code
+const code = await build(options);
+
+// Get bundled code only (no file written)
+const codeOnly = await build({ ...options, skipWrite: true });
 ```
 
 ## Key Functions
@@ -123,17 +131,19 @@ await build(options);
 
 ### src/build.ts
 
-#### `build(options: BuildOptions): Promise<void>`
+#### `build(options: BuildOptions): Promise<string>`
 - Resolves paths relative to `Deno.cwd()`
 - If `strict` mode: runs `typeCheck()` before bundling, throws on failure
 - Auto-detects import map from `deno.json`, `deno.jsonc`, or `import_map.json`
 - If `useEsbuild`: dynamically imports and uses `buildWithEsbuild()` from `./esbuild-bundler.ts`
 - Otherwise: uses `@deno/emit` bundle() with `type: "module"`
 - If `minify` with @deno/emit: post-processes output with `minifyCode()` from `./esbuild-bundler.ts`
-- Creates output directory if needed
+- If `skipWrite` is false (default): creates output directory and writes file
+- If `skipWrite` is true: skips directory creation and file writing
+- Always returns the bundled code as a string
 - Exits with code 1 if entry point not found
 
-#### `watchAndRebuild(options: BuildOptions): Promise<void>`
+#### `watchAndRebuild(options: BuildOptions): Promise<never>`
 - Watches source directory + additional `watchDirs` via `Deno.watchFs()`
 - Debounces rebuilds (100ms)
 - Filters for `.ts`, `.tsx`, `.js`, `.jsx` files only
@@ -141,10 +151,12 @@ await build(options);
 
 ### src/esbuild-bundler.ts
 
-#### `buildWithEsbuild(options: EsbuildOptions): Promise<void>`
+#### `buildWithEsbuild(options: EsbuildOptions): Promise<string>`
 - Uses esbuild with `@luca/esbuild-deno-loader` plugins
 - Supports Deno import maps, JSR packages, and npm: specifiers
 - Native minification via esbuild's `minify` option
+- If `skipWrite` is true: uses esbuild's `write: false` option and returns code from `outputFiles`
+- If `skipWrite` is false: writes to file, then reads and returns the code
 - Calls `esbuild.stop()` after bundling to clean up
 
 #### `minifyCode(code: string): Promise<string>`

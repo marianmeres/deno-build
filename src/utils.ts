@@ -31,6 +31,8 @@ export interface BuildOptions {
 	useEsbuild: boolean;
 	/** Minify the output bundle */
 	minify: boolean;
+	/** Skip writing to file, only return bundled code */
+	skipWrite?: boolean;
 }
 
 /** Default source root directory */
