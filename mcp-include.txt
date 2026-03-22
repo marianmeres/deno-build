@@ -1,0 +1,1 @@
+CLI tool and library to bundle Deno TypeScript sources into vanilla JavaScript ES modules for browser use. Takes TS source and produces a single JS file suitable for <script type="module"> in HTML pages.
