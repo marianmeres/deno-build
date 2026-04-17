@@ -46,8 +46,12 @@ export async function buildWithEsbuild(options: EsbuildOptions): Promise<string>
 
 	try {
 		const denoPluginsConfig = importMapPath ? { configPath: importMapPath } : {};
+		// Cast: @luca/esbuild-deno-loader bundles its own Plugin type definitions
+		// which can lag the installed esbuild version. The runtime contract is
+		// compatible; only the TS types diverge.
+		const plugins = denoPlugins(denoPluginsConfig) as unknown as esbuild.Plugin[];
 		const result = await esbuild.build({
-			plugins: [...denoPlugins(denoPluginsConfig)],
+			plugins,
 			entryPoints: [entryPath],
 			write: false,
 			bundle: true,
