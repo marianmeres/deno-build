@@ -3,10 +3,13 @@ import {
 	build,
 	watchAndRebuild,
 	getPackageInfo,
+	EntryNotFoundError,
+	logStyled,
 	type BuildOptions,
 	DEFAULT_ROOT,
 	DEFAULT_ENTRY_POINT,
 	DEFAULT_OUT_FILENAME,
+	DEFAULT_OUT_DIR,
 } from "./src/mod.ts";
 
 function printUsage() {
@@ -19,7 +22,7 @@ Options:
   --root, -r <path>      Source root directory (default: "${DEFAULT_ROOT}")
   --entry, -e <file>     Entry point file name (default: "${DEFAULT_ENTRY_POINT}")
   --outfile, -f <file>   Output file name (default: "${DEFAULT_OUT_FILENAME}")
-  --outdir, -o <path>    Output directory (default: "./dist")
+  --outdir, -o <path>    Output directory (default: "${DEFAULT_OUT_DIR}")
   --watch, -w            Watch for changes and rebuild automatically
   --watch-dir, -d <path> Additional directory to watch (can be repeated)
   --strict, -s           Run type checking before bundling (fail on type errors)
@@ -34,14 +37,15 @@ Examples:
   deno run -A jsr:@marianmeres/deno-build --outdir ./public/js --watch
   deno run -A jsr:@marianmeres/deno-build --watch --watch-dir ../shared-lib -d ../utils
 
-Note: Automatically detects deno.json/deno.jsonc/import_map.json in cwd for import resolution.
+Note: Automatically detects deno.json/deno.jsonc/import_map.json (walking up
+from cwd) for import resolution.
 `);
 }
 
 async function main() {
 	const pkg = await getPackageInfo();
 	if (pkg) {
-		console.log(`%c${pkg.name} v${pkg.version}`, "color: cyan");
+		logStyled("err", `%c${pkg.name} v${pkg.version}`, "color: cyan");
 	}
 
 	const args = parseArgs(Deno.args, {
@@ -65,16 +69,25 @@ async function main() {
 			root: DEFAULT_ROOT,
 			entry: DEFAULT_ENTRY_POINT,
 			outfile: DEFAULT_OUT_FILENAME,
-			outdir: "./dist",
+			outdir: DEFAULT_OUT_DIR,
 		},
 	});
 
 	if (args.help) {
 		printUsage();
-		Deno.exit(0);
+		return;
 	}
 
 	const skipWrite = args["skip-write"];
+
+	if (skipWrite && args.watch) {
+		console.error(
+			"Error: --skip-write and --watch cannot be used together. " +
+				"Watch mode streams rebuilds to a file; --skip-write prints a single " +
+				"build to stdout."
+		);
+		Deno.exit(2);
+	}
 
 	const options: BuildOptions = {
 		root: args.root,
@@ -92,9 +105,19 @@ async function main() {
 
 	if (skipWrite) {
 		console.log(code);
-	} else if (args.watch) {
+		return;
+	}
+
+	if (args.watch) {
 		await watchAndRebuild(options);
 	}
 }
 
-main();
+main().catch((error) => {
+	if (error instanceof EntryNotFoundError) {
+		logStyled("err", `%cError: ${error.message}`, "color: red");
+		Deno.exit(1);
+	}
+	console.error(error);
+	Deno.exit(1);
+});

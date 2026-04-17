@@ -10,16 +10,17 @@ Machine-readable documentation for AI agents working with this codebase.
 - **Purpose**: Bundle Deno TypeScript sources into vanilla ES module JavaScript for browser use
 - **CLI entry point**: `cli.ts`
 - **Library entry point**: `src/mod.ts`
+- **Esbuild sub-entry**: `src/esbuild-bundler.ts`
 
 ## Architecture
 
 ```
-cli.ts                 # CLI entry point (argument parsing, main())
+cli.ts                 # CLI entry point (argument parsing, main(), top-level catch)
 src/
-  mod.ts               # Library entry point (re-exports all public APIs)
+  mod.ts               # Library entry — re-exports utils.ts + build.ts (NOT esbuild)
   build.ts             # Core build logic (build, watchAndRebuild)
-  esbuild-bundler.ts   # Alternative esbuild bundler (supports npm: specifiers)
-  utils.ts             # Types, constants, and utility functions
+  esbuild-bundler.ts   # Esbuild bundler (supports npm: specifiers) — own export
+  utils.ts             # Types, constants, utilities, EntryNotFoundError
 example/
   src/mod.ts           # Example entry point
   src/utils.ts         # Example utilities
@@ -33,10 +34,13 @@ example/
 |---------|---------|
 | `@deno/emit` | TypeScript bundling via `bundle()` function (default bundler) |
 | `@std/cli` | CLI argument parsing via `parseArgs()` |
-| `@std/path` | Path resolution via `resolve()` |
+| `@std/path` | Path resolution (`resolve`, `dirname`, `join`, `relative`, `fromFileUrl`) |
 | `@std/fs` | File existence checks via `exists()` |
-| `esbuild` | Alternative bundler with npm support (lazy-loaded) |
-| `@luca/esbuild-deno-loader` | Deno plugin for esbuild (lazy-loaded) |
+| `esbuild` | Alternative bundler with npm support (dynamically loaded from `build.ts`) |
+| `@luca/esbuild-deno-loader` | Deno plugin for esbuild |
+
+The `./esbuild` sub-export keeps esbuild out of the `./lib` import graph, so
+consumers who never use esbuild don't pay for its startup cost.
 
 ## CLI Interface
 
@@ -51,142 +55,156 @@ example/
 | `--watch` | `-w` | boolean | `false` | Enable watch mode |
 | `--watch-dir` | `-d` | string[] | `[]` | Additional directories to watch (repeatable) |
 | `--strict` | `-s` | boolean | `false` | Run `deno check` before bundling |
-| `--esbuild` | `-b` | boolean | `false` | Use esbuild bundler (enables npm: specifier support) |
+| `--esbuild` | `-b` | boolean | `false` | Use esbuild bundler |
 | `--minify` | `-m` | boolean | `false` | Minify the output bundle |
-| `--skip-write` | `-k` | boolean | `false` | Output bundled code to stdout instead of writing to file |
+| `--skip-write` | `-k` | boolean | `false` | Print bundled code to stdout instead of writing a file |
 | `--help` | `-h` | boolean | `false` | Show help |
 
-### Usage Patterns
+Invalid combinations:
+- `--skip-write` + `--watch` → exit code 2 with message on stderr.
 
-```bash
-# Default: src/mod.ts -> dist/bundle.js
-deno run -A jsr:@marianmeres/deno-build
+### Stream contract
 
-# Custom paths
-deno run -A jsr:@marianmeres/deno-build --root lib --entry index.ts --outfile app.js
+- **stdout**: bundled code (only when `--skip-write`), otherwise nothing.
+- **stderr**: version banner, progress messages, errors, watch-mode notifications.
 
-# Watch mode
-deno run -A jsr:@marianmeres/deno-build --watch
+This makes `deno run -A jsr:@marianmeres/deno-build --skip-write > out.js` safe.
 
-# Watch with additional directories
-deno run -A jsr:@marianmeres/deno-build --watch --watch-dir ../shared-lib -d ../utils
+### Exit codes
 
-# Strict mode (type checking)
-deno run -A jsr:@marianmeres/deno-build --strict
-
-# Esbuild bundler (supports npm: specifiers)
-deno run -A jsr:@marianmeres/deno-build --esbuild
-
-# Minify output
-deno run -A jsr:@marianmeres/deno-build --minify
-
-# Esbuild with minification
-deno run -A jsr:@marianmeres/deno-build --esbuild --minify
-
-# Output to stdout instead of file
-deno run -A jsr:@marianmeres/deno-build --skip-write
-```
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Build failed (includes `EntryNotFoundError` and all other errors) |
+| 2 | Invalid CLI argument combination (`--skip-write` + `--watch`) |
 
 ### Library Usage
 
 ```typescript
-import { build, BuildOptions } from "jsr:@marianmeres/deno-build/lib";
+import { build, EntryNotFoundError } from "jsr:@marianmeres/deno-build/lib";
 
-const options: BuildOptions = {
+// Defaults applied automatically
+await build();
+
+// With options (all optional)
+await build({
   root: "src",
   entry: "mod.ts",
   outDir: "./dist",
   outFile: "bundle.js",
-  watchDirs: [],
-  strict: false,
-  useEsbuild: false,
-  minify: false,
-};
+  minify: true,
+});
 
-// Write to file and get bundled code
-const code = await build(options);
+// Skip disk write, just return code
+const code = await build({ skipWrite: true });
 
-// Get bundled code only (no file written)
-const codeOnly = await build({ ...options, skipWrite: true });
+// Error handling
+try {
+  await build();
+} catch (e) {
+  if (e instanceof EntryNotFoundError) {
+    // user typo or wrong cwd
+  } else {
+    // real bundler error
+  }
+}
 ```
 
 ## Key Functions
 
 ### src/utils.ts
 
+#### `resolveBuildOptions(options?: BuildOptions): ResolvedBuildOptions`
+- Fills in defaults for any omitted fields.
+- Used internally by `build()` and `watchAndRebuild()`; exported for advanced callers.
+
 #### `getPackageInfo(): Promise<PackageInfo | null>`
-- Returns `{ name, version }` from package metadata
-- For JSR: parses from `import.meta.url` (no network request)
-- For local: reads from `deno.json`
-- Returns `null` on any error (silent fail)
+- Returns `{ name, version }` from package metadata.
+- For JSR: parses from `import.meta.url` (no network request).
+- For local: reads from `deno.json` relative to `src/utils.ts`.
+- Returns `null` on any error (silent fail).
 
 #### `typeCheck(entryPath: string): Promise<boolean>`
-- Runs `deno check` on the entry point via `Deno.Command`
-- Streams stdout/stderr to console (user sees errors)
-- Returns `true` if type checking passes, `false` otherwise
+- Runs `deno check` on the entry point via `Deno.Command`.
+- Streams stdout/stderr to console.
+- Returns `true` if type checking passes, `false` otherwise.
 
-#### `findImportMap(): Promise<string | undefined>`
-- Searches cwd for: `deno.json` > `deno.jsonc` > `import_map.json`
-- Returns absolute path or undefined
+#### `findImportMap(startDir?: string): Promise<string | undefined>`
+- Searches for `deno.json`, `deno.jsonc`, or `import_map.json` (in that order).
+- Walks **up** from `startDir` (default: `Deno.cwd()`) to the filesystem root.
+- Returns the first absolute path found, or `undefined`.
+
+#### `supportsColor(): boolean`
+- Returns true when `Deno.stdout.isTerminal()` — cached after first call.
+
+#### `logStyled(stream, message, ...styles): void`
+- Writes to stdout or stderr with CSS `%c` styling when terminal, stripped otherwise.
 
 ### src/build.ts
 
-#### `build(options: BuildOptions): Promise<string>`
-- Resolves paths relative to `Deno.cwd()`
-- If `strict` mode: runs `typeCheck()` before bundling, throws on failure
-- Auto-detects import map from `deno.json`, `deno.jsonc`, or `import_map.json`
-- If `useEsbuild`: dynamically imports and uses `buildWithEsbuild()` from `./esbuild-bundler.ts`
-- Otherwise: uses `@deno/emit` bundle() with `type: "module"`
-- If `minify` with @deno/emit: post-processes output with `minifyCode()` from `./esbuild-bundler.ts`
-- If `skipWrite` is false (default): creates output directory and writes file
-- If `skipWrite` is true: skips directory creation and file writing
-- Always returns the bundled code as a string
-- Exits with code 1 if entry point not found
+#### `build(options?: BuildOptions): Promise<string>`
+- Resolves paths relative to `Deno.cwd()`.
+- **Throws `EntryNotFoundError` if the entry file does not exist** (does NOT call `Deno.exit`).
+- If `strict`: runs `typeCheck()` before bundling, throws on failure.
+- Auto-detects import map via `findImportMap()` (walks ancestors).
+- If `useEsbuild`: dynamically imports `./esbuild-bundler.ts`, calls `buildWithEsbuild()`.
+- Otherwise: uses `@deno/emit` `bundle()`.
+- If `minify` with @deno/emit path: post-processes via `minifyCode()`.
+- If `skipWrite` is false: creates output directory and writes file.
+- Returns the bundled code as a string.
+- All progress/success messages go to **stderr**; errors rethrow after logging.
 
-#### `watchAndRebuild(options: BuildOptions): Promise<never>`
-- Watches source directory + additional `watchDirs` via `Deno.watchFs()`
-- Debounces rebuilds (100ms)
-- Filters for `.ts`, `.tsx`, `.js`, `.jsx` files only
-- Continues watching after build errors
+#### `watchAndRebuild(options?: BuildOptions): Promise<never>`
+- Validates every watch path exists (throws otherwise).
+- Watches source dir + `watchDirs` via `Deno.watchFs()`.
+- **Debounces** rebuilds (100ms) **and serializes** them: a rebuild cannot start
+  while a previous one is running. If changes arrive during a rebuild, exactly
+  one follow-up rebuild is queued.
+- Filters for `.ts`/`.tsx`/`.js`/`.jsx` files only.
+- **Excludes the output bundle path** from trigger events to prevent feedback loops.
+- Passes `keepEsbuildAlive: true` to `build()` so the esbuild service is reused
+  across rebuilds instead of being started/stopped each time.
+- Calls `stopEsbuild()` on watcher termination (best-effort).
+- Never returns normally — throws only if the watcher itself dies.
 
-### src/esbuild-bundler.ts
+### src/esbuild-bundler.ts (sub-export `./esbuild`)
 
 #### `buildWithEsbuild(options: EsbuildOptions): Promise<string>`
-- Uses esbuild with `@luca/esbuild-deno-loader` plugins
-- Supports Deno import maps, JSR packages, and npm: specifiers
-- Native minification via esbuild's `minify` option
-- If `skipWrite` is true: uses esbuild's `write: false` option and returns code from `outputFiles`
-- If `skipWrite` is false: writes to file, then reads and returns the code
-- Calls `esbuild.stop()` after bundling to clean up
+- Uses esbuild with `@luca/esbuild-deno-loader` plugins.
+- Always runs with `write: false` internally; the function handles the final
+  disk write itself (single I/O, no redundant read-back).
+- Creates the output directory if writing.
+- Defensive check on `result.outputFiles`; throws `"esbuild produced no output files"` if empty.
+- `try { ... } finally { esbuild.stop() }` — service is always cleaned up on error.
+- When `keepAlive: true`, does NOT call `esbuild.stop()`. Caller must invoke `stopEsbuild()`.
 
-#### `minifyCode(code: string): Promise<string>`
-- Uses esbuild's `transform()` API for minification
-- Called by @deno/emit path when `--minify` flag is used
+#### `minifyCode(code: string, keepAlive?: boolean): Promise<string>`
+- Uses esbuild's `transform()` API for minification.
+- `try/finally` ensures `esbuild.stop()` is called on errors.
+- `keepAlive: true` skips the stop call.
 
-## Path Resolution
-
-All paths are resolved relative to `Deno.cwd()` using `@std/path/resolve`:
-- Entry point: `resolve(cwd, root, entry)`
-- Output dir: `resolve(cwd, outDir)`
-- Output file: `resolve(outDirPath, outFile)`
-- Import map: `resolve(cwd, candidate)`
-
-This ensures the tool works correctly when installed as a package and run from any project directory.
-
-## Output Format
-
-- ES module JavaScript (`type: "module"`)
-- Named exports preserved
-- TypeScript types stripped
-- Single file bundle (all imports inlined)
+#### `stopEsbuild(): void`
+- Explicitly stops the esbuild service. Safe to call multiple times.
 
 ## Error Handling
 
-| Error | Behavior |
-|-------|----------|
-| Entry point not found | Logs error, exits with code 1 |
-| Bundle failure | Logs error message, throws (re-throws in watch mode) |
-| Watch mode build error | Logs error, continues watching |
+| Condition | Behavior |
+|-----------|----------|
+| Entry point not found | `build()` throws `EntryNotFoundError`; CLI prints `Error: Entry point not found: ...` and exits 1 |
+| Type check fails | `build()` throws `Error("Type checking failed")`; `deno check` output already streamed to user |
+| Bundle failure | `build()` logs `[HH:MM:SS] Build failed: ...` on stderr, rethrows |
+| Watch-mode rebuild failure | Error already logged by `build()`; watcher continues |
+| Watch path missing | `watchAndRebuild()` throws before entering the loop |
+| `--skip-write` + `--watch` | CLI exits 2 before building |
+
+## Path Resolution
+
+All paths are resolved relative to `Deno.cwd()` using `@std/path`:
+- Entry point: `resolve(cwd, root, entry)`
+- Output dir: `resolve(cwd, outDir)`
+- Output file: `resolve(outDirPath, outFile)`
+- Watch paths: `resolve(cwd, watchDir)` for each
+- Import map: walks up starting at `resolve(cwd)`
 
 ## Deno Tasks
 
@@ -211,9 +229,9 @@ Shorthand: `deno run -A` (all permissions)
 
 ## Extension Points
 
-To modify this tool:
-1. **Add source maps**: Handle `result.map` from bundle output
-2. **Custom transforms**: Process `result.code` before writing
-3. **Multiple entry points**: Loop over entries, call `build()` for each
-4. **Custom type checking**: Modify `typeCheck()` to use different compiler options
-5. **Additional esbuild options**: Extend `buildWithEsbuild()` to support more esbuild features
+1. **Source maps**: Handle `result.map` from bundle output.
+2. **Custom transforms**: Post-process the returned code before writing.
+3. **Multiple entry points**: Loop over entries, call `build()` for each.
+4. **Custom type checking**: Fork `typeCheck()` to pass different compiler options.
+5. **Additional esbuild options**: Extend `buildWithEsbuild()` to forward more esbuild knobs.
+6. **Alternative color handling**: Replace `logStyled()` or override `supportsColor()`'s cache.

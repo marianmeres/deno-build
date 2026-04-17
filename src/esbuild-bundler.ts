@@ -1,5 +1,6 @@
 import * as esbuild from "esbuild";
 import { denoPlugins } from "@luca/esbuild-deno-loader";
+import { dirname } from "@std/path";
 
 /**
  * Configuration options for the esbuild bundler.
@@ -15,6 +16,15 @@ export interface EsbuildOptions {
 	minify?: boolean;
 	/** Skip writing to file, only return bundled code */
 	skipWrite?: boolean;
+	/**
+	 * When true, do NOT call `esbuild.stop()` after bundling. The caller is
+	 * responsible for invoking {@link stopEsbuild} when done. Useful in
+	 * long-running scenarios (e.g. watch mode) where paying the esbuild
+	 * startup cost on every rebuild would defeat its speed advantage.
+	 *
+	 * @default false
+	 */
+	keepAlive?: boolean;
 }
 
 /**
@@ -23,49 +33,45 @@ export interface EsbuildOptions {
  * Uses `@luca/esbuild-deno-loader` plugins to support Deno's import map,
  * JSR packages, and npm: specifiers. Output is an ES module.
  *
+ * The bundled code is captured in memory and written to disk by this function
+ * (no double I/O). Set `skipWrite: true` to return the code without touching
+ * the filesystem.
+ *
  * @param options - Esbuild configuration options
  * @returns The bundled code as a string
- * @example
- * ```ts
- * import { buildWithEsbuild } from "jsr:@marianmeres/deno-build/lib";
- *
- * // Write to file and get code
- * const code = await buildWithEsbuild({
- *   entryPath: "/path/to/src/mod.ts",
- *   outPath: "/path/to/dist/bundle.js",
- *   importMapPath: "/path/to/deno.json",
- *   minify: true,
- * });
- *
- * // Get code only without writing to file
- * const codeOnly = await buildWithEsbuild({
- *   entryPath: "/path/to/src/mod.ts",
- *   outPath: "/path/to/dist/bundle.js",
- *   skipWrite: true,
- * });
- * ```
+ * @throws Error if esbuild produces no output
  */
 export async function buildWithEsbuild(options: EsbuildOptions): Promise<string> {
-	const { entryPath, outPath, importMapPath, minify, skipWrite } = options;
+	const { entryPath, outPath, importMapPath, minify, skipWrite, keepAlive } = options;
 
-	const result = await esbuild.build({
-		plugins: [...denoPlugins({ configPath: importMapPath })],
-		entryPoints: [entryPath],
-		outfile: skipWrite ? undefined : outPath,
-		write: !skipWrite,
-		bundle: true,
-		format: "esm",
-		minify: minify ?? false,
-	});
+	try {
+		const denoPluginsConfig = importMapPath ? { configPath: importMapPath } : {};
+		const result = await esbuild.build({
+			plugins: [...denoPlugins(denoPluginsConfig)],
+			entryPoints: [entryPath],
+			write: false,
+			bundle: true,
+			format: "esm",
+			minify: minify ?? false,
+		});
 
-	esbuild.stop();
+		const outputFile = result.outputFiles?.[0];
+		if (!outputFile) {
+			throw new Error("esbuild produced no output files");
+		}
+		const code = outputFile.text;
 
-	if (skipWrite) {
-		return result.outputFiles![0].text;
+		if (!skipWrite) {
+			await Deno.mkdir(dirname(outPath), { recursive: true });
+			await Deno.writeTextFile(outPath, code);
+		}
+
+		return code;
+	} finally {
+		if (!keepAlive) {
+			esbuild.stop();
+		}
 	}
-
-	// When writing to file, read it back to return the code
-	return await Deno.readTextFile(outPath);
 }
 
 /**
@@ -74,20 +80,28 @@ export async function buildWithEsbuild(options: EsbuildOptions): Promise<string>
  * Used by the @deno/emit bundler path when `--minify` flag is specified.
  *
  * @param code - JavaScript code to minify
+ * @param keepAlive - When true, do NOT call `esbuild.stop()` after transforming
+ *                   (default: false). See {@link EsbuildOptions.keepAlive}.
  * @returns Minified code
- * @example
- * ```ts
- * import { minifyCode } from "jsr:@marianmeres/deno-build/lib";
- *
- * const minified = await minifyCode(`
- *   export function greet(name) {
- *     return "Hello, " + name + "!";
- *   }
- * `);
- * ```
  */
-export async function minifyCode(code: string): Promise<string> {
-	const result = await esbuild.transform(code, { minify: true });
+export async function minifyCode(code: string, keepAlive = false): Promise<string> {
+	try {
+		const result = await esbuild.transform(code, { minify: true });
+		return result.code;
+	} finally {
+		if (!keepAlive) {
+			esbuild.stop();
+		}
+	}
+}
+
+/**
+ * Explicitly stops the esbuild service. Safe to call multiple times.
+ *
+ * Only needed when {@link buildWithEsbuild} or {@link minifyCode} were invoked
+ * with `keepAlive: true`. Without this call, the esbuild child process keeps
+ * running and prevents Deno from exiting.
+ */
+export function stopEsbuild(): void {
 	esbuild.stop();
-	return result.code;
 }
