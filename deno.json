@@ -1,6 +1,6 @@
 {
   "name": "@marianmeres/deno-build",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "exports": {
     ".": "./cli.ts",
     "./lib": "./src/mod.ts",
