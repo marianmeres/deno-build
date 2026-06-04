@@ -1,5 +1,41 @@
 # Changelog
 
+## 2.2.0
+
+Additive, non-breaking. Default behavior is unchanged — a build without `--hash`
+still writes exactly one file.
+
+### New: content hashing & manifest (`--hash`)
+
+- New `--hash` flag (CLI) / `hash?: boolean` option. When enabled, a build emits
+  a content-hashed copy of the bundle (`bundle.<hash>.js`, SHA-256 of the final,
+  post-minify bytes, 8 hex chars) **and** a manifest mapping the logical name to
+  the hashed name (`{ "bundle.js": "bundle.<hash>.js" }`) for cache-busting. The
+  stable `outFile` is still written, so existing references and `--watch` flows
+  are unaffected.
+- New `--manifest <file>` flag / `manifest?: string` option to set the manifest
+  name. Default `<outfile>.manifest.json` (e.g. `bundle.js.manifest.json`) —
+  namespaced to the outfile so it won't collide with an unrelated `manifest.json`.
+- The manifest doubles as a cleanup ledger: in `--watch` mode each rebuild
+  replaces the previous hashed file instead of accumulating orphans.
+- `--hash` is ignored with `--skip-write` (no files are written); a warning is
+  printed to stderr.
+
+### New exports (`./lib`)
+
+- `function computeContentHash(code: string, len?: number): Promise<string>`
+- `function insertHashIntoFileName(fileName: string, hash: string): string`
+- `function emitHashedOutputs(options): Promise<EmitHashedOutputsResult>` plus the
+  `EmitHashedOutputsOptions` / `EmitHashedOutputsResult` interfaces.
+- `const DEFAULT_HASH_LENGTH = 8`, `const DEFAULT_MANIFEST_SUFFIX = ".manifest.json"`.
+- `BuildOptions` / `ResolvedBuildOptions` gained `hash` and `manifest` fields.
+
+### Internal
+
+- Watch mode now ignores **all** writes under `outDir` (not just the single
+  stable output path) when deciding whether to rebuild, so the hashed file and
+  manifest writes can't trigger a feedback loop.
+
 ## 2.0.0
 
 Major cleanup and bug-fix release. Most users will not need to change anything;

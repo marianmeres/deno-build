@@ -36,6 +36,20 @@ export interface BuildOptions {
 	/** Skip writing to file; only return bundled code (default: false) */
 	skipWrite?: boolean;
 	/**
+	 * Emit a content-hashed copy of the bundle (`bundle.<hash>.js`) plus a
+	 * manifest mapping the logical name to the hashed name, for cache-busting.
+	 * The stable `outFile` is still written. Has no effect with `skipWrite`.
+	 * (default: false)
+	 */
+	hash?: boolean;
+	/**
+	 * Manifest file name written within `outDir` when `hash` is enabled.
+	 * Defaults to `${outFile}${DEFAULT_MANIFEST_SUFFIX}` (e.g.
+	 * `bundle.js.manifest.json`) — namespaced to the outfile so it won't clash
+	 * with an unrelated `manifest.json` (e.g. a PWA web app manifest).
+	 */
+	manifest?: string;
+	/**
 	 * Advanced: keep the esbuild service alive after bundling instead of calling
 	 * `esbuild.stop()`. Used internally by watch mode to avoid spinning esbuild
 	 * up and down between rebuilds. Callers who set this MUST call {@link stopEsbuild}
@@ -60,6 +74,8 @@ export interface ResolvedBuildOptions {
 	useEsbuild: boolean;
 	minify: boolean;
 	skipWrite: boolean;
+	hash: boolean;
+	manifest: string;
 	keepEsbuildAlive: boolean;
 }
 
@@ -76,19 +92,29 @@ export const DEFAULT_OUT_FILENAME: string = "bundle.js";
 export const DEFAULT_OUT_DIR: string = "./dist";
 
 /**
+ * Default suffix appended to `outFile` to derive the manifest name when `hash`
+ * is enabled and no explicit `manifest` is given (e.g. `bundle.js` →
+ * `bundle.js.manifest.json`).
+ */
+export const DEFAULT_MANIFEST_SUFFIX: string = ".manifest.json";
+
+/**
  * Fills in defaults for any omitted {@link BuildOptions} fields.
  */
 export function resolveBuildOptions(options: BuildOptions = {}): ResolvedBuildOptions {
+	const outFile = options.outFile ?? DEFAULT_OUT_FILENAME;
 	return {
 		root: options.root ?? DEFAULT_ROOT,
 		entry: options.entry ?? DEFAULT_ENTRY_POINT,
 		outDir: options.outDir ?? DEFAULT_OUT_DIR,
-		outFile: options.outFile ?? DEFAULT_OUT_FILENAME,
+		outFile,
 		watchDirs: options.watchDirs ?? [],
 		strict: options.strict ?? false,
 		useEsbuild: options.useEsbuild ?? false,
 		minify: options.minify ?? false,
 		skipWrite: options.skipWrite ?? false,
+		hash: options.hash ?? false,
+		manifest: options.manifest ?? `${outFile}${DEFAULT_MANIFEST_SUFFIX}`,
 		keepEsbuildAlive: options.keepEsbuildAlive ?? false,
 	};
 }
@@ -170,7 +196,7 @@ export async function getPackageInfo(): Promise<PackageInfo | null> {
 
 		// JSR URL format: https://jsr.io/@scope/name/version/file.ts
 		const jsrMatch = baseUrl.match(
-			/^https:\/\/jsr\.io\/(@[^/]+\/[^/]+)\/([^/]+)\//
+			/^https:\/\/jsr\.io\/(@[^/]+\/[^/]+)\/([^/]+)\//,
 		);
 		if (jsrMatch) {
 			return { name: jsrMatch[1], version: jsrMatch[2] };
@@ -203,7 +229,7 @@ export async function getPackageInfo(): Promise<PackageInfo | null> {
  * @returns Absolute path to the import map file, or undefined if none found
  */
 export async function findImportMap(
-	startDir: string = Deno.cwd()
+	startDir: string = Deno.cwd(),
 ): Promise<string | undefined> {
 	const candidates = ["deno.json", "deno.jsonc", "import_map.json"];
 	let current = resolve(startDir);

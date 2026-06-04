@@ -1,5 +1,5 @@
 import { bundle } from "@deno/emit";
-import { relative, resolve } from "@std/path";
+import { isAbsolute, relative, resolve } from "@std/path";
 import { exists } from "@std/fs";
 import {
 	BuildOptions,
@@ -10,6 +10,7 @@ import {
 	timestamp,
 	typeCheck,
 } from "./utils.ts";
+import { emitHashedOutputs } from "./hash.ts";
 
 /**
  * Bundles TypeScript source files into a single JavaScript ES module.
@@ -54,6 +55,8 @@ export async function build(options: BuildOptions = {}): Promise<string> {
 		useEsbuild,
 		minify,
 		skipWrite,
+		hash,
+		manifest,
 		keepEsbuildAlive,
 	} = opts;
 
@@ -70,7 +73,7 @@ export async function build(options: BuildOptions = {}): Promise<string> {
 			"err",
 			`%c[${timestamp()}]%c Type checking ${root}/${entry}...`,
 			"color: gray",
-			"color: inherit"
+			"color: inherit",
 		);
 		if (!(await typeCheck(entryPath))) {
 			throw new Error("Type checking failed");
@@ -85,7 +88,7 @@ export async function build(options: BuildOptions = {}): Promise<string> {
 		"err",
 		`%c[${timestamp()}]%c Building ${root}/${entry}${bundlerLabel}${minifyLabel}...`,
 		"color: gray",
-		"color: inherit"
+		"color: inherit",
 	);
 
 	try {
@@ -126,8 +129,28 @@ export async function build(options: BuildOptions = {}): Promise<string> {
 				"err",
 				`%c[${timestamp()}]%c  ✓ ${relative(Deno.cwd(), outPath)}`,
 				"color: gray",
-				"color: green"
+				"color: green",
 			);
+
+			// Additively emit a content-hashed copy + manifest for cache-busting.
+			// The stable file above is left untouched; both bundler paths have
+			// already written it, so this only adds the hashed file and manifest.
+			if (hash) {
+				const { hashedFile, manifestFile } = await emitHashedOutputs({
+					outDir: outDirPath,
+					outFile,
+					manifest,
+					code,
+				});
+				for (const f of [hashedFile, manifestFile]) {
+					logStyled(
+						"err",
+						`%c[${timestamp()}]%c  ✓ ${relative(Deno.cwd(), f)}`,
+						"color: gray",
+						"color: green",
+					);
+				}
+			}
 		}
 
 		return code;
@@ -137,7 +160,7 @@ export async function build(options: BuildOptions = {}): Promise<string> {
 			`%c[${timestamp()}] Build failed: ${
 				error instanceof Error ? error.message : error
 			}`,
-			"color: red"
+			"color: red",
 		);
 		throw error;
 	}
@@ -172,15 +195,23 @@ export async function watchAndRebuild(options: BuildOptions = {}): Promise<never
 		}
 	}
 
-	const outPath = resolve(Deno.cwd(), opts.outDir, opts.outFile);
+	const outDirPath = resolve(Deno.cwd(), opts.outDir);
+	// Ignore everything under the output directory (stable bundle, hashed copy,
+	// and manifest) so our own writes can't trigger a rebuild feedback loop.
+	const isInOutDir = (p: string) => {
+		const rel = relative(outDirPath, p);
+		return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+	};
 
 	logStyled(
 		"err",
-		`\n%c[${timestamp()}]%c Watching for changes:\n${watchPaths
-			.map((p) => `    ${p}`)
-			.join("\n")}\n`,
+		`\n%c[${timestamp()}]%c Watching for changes:\n${
+			watchPaths
+				.map((p) => `    ${p}`)
+				.join("\n")
+		}\n`,
 		"color: gray",
-		"color: cyan"
+		"color: cyan",
 	);
 
 	// In watch mode, reuse the build options but mark esbuild as keep-alive so
@@ -188,7 +219,7 @@ export async function watchAndRebuild(options: BuildOptions = {}): Promise<never
 	const rebuildOptions: BuildOptions = { ...options, keepEsbuildAlive: true };
 
 	const watcher = Deno.watchFs(watchPaths);
-	let debounceTimeout: number | undefined;
+	let debounceTimeout: ReturnType<typeof setTimeout> | undefined;
 	let inFlight: Promise<void> | undefined;
 	let pending = false;
 
@@ -207,7 +238,7 @@ export async function watchAndRebuild(options: BuildOptions = {}): Promise<never
 				"out",
 				`\n%c[${timestamp()}]%c Watching for changes...\n`,
 				"color: gray",
-				"color: cyan"
+				"color: cyan",
 			);
 		})().finally(() => {
 			inFlight = undefined;
@@ -224,11 +255,11 @@ export async function watchAndRebuild(options: BuildOptions = {}): Promise<never
 
 			const hasRelevantFile = event.paths.some(
 				(p) =>
-					p !== outPath &&
+					!isInOutDir(p) &&
 					(p.endsWith(".ts") ||
 						p.endsWith(".tsx") ||
 						p.endsWith(".js") ||
-						p.endsWith(".jsx"))
+						p.endsWith(".jsx")),
 			);
 			if (!hasRelevantFile) continue;
 

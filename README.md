@@ -55,6 +55,9 @@ deno run -A jsr:@marianmeres/deno-build --minify
 # Combine flags: esbuild with minification
 deno run -A jsr:@marianmeres/deno-build --esbuild --minify
 
+# Content-hashed copy + manifest for cache-busting (see "Content hashing" below)
+deno run -A jsr:@marianmeres/deno-build --hash
+
 # Print bundle to stdout instead of writing a file (pipe-friendly)
 deno run -A jsr:@marianmeres/deno-build --skip-write > bundle.js
 ```
@@ -72,6 +75,8 @@ deno run -A jsr:@marianmeres/deno-build --skip-write > bundle.js
 | `--strict` | `-s` | `false` | Run type checking before bundling (fail on type errors) |
 | `--esbuild` | `-b` | `false` | Use esbuild bundler (enables npm: specifier support) |
 | `--minify` | `-m` | `false` | Minify the output bundle |
+| `--hash` | | `false` | Also emit a content-hashed copy + manifest (cache-busting) |
+| `--manifest` | | `<outfile>.manifest.json` | Manifest file name (implies/used with `--hash`) |
 | `--skip-write` | `-k` | `false` | Print bundled code to stdout instead of writing to file |
 | `--help` | `-h` | | Show help message |
 
@@ -120,6 +125,43 @@ Use in HTML:
 </script>
 ```
 
+## Content hashing & cache-busting
+
+For production deploys you usually want a long-lived `Cache-Control` on your JS and a
+filename that changes whenever the contents change. Pass `--hash` and the build emits
+**three** files instead of one:
+
+```bash
+deno run -A jsr:@marianmeres/deno-build --hash
+```
+
+```
+dist/
+├── bundle.js                      # stable name (unchanged — simple/dev includes still work)
+├── bundle.a1b2c3d4.js             # same bytes, content-hashed name for cache-busting
+└── bundle.js.manifest.json        # { "bundle.js": "bundle.a1b2c3d4.js" }
+```
+
+- The stable `bundle.js` is still written, so existing `<script src="./dist/bundle.js">`
+  references and `--watch` dev flows keep working unchanged.
+- The hashed copy is byte-identical; the **hash is a SHA-256 of the final emitted bundle**
+  (computed *after* minification, so `--hash --minify` reflects the minified bytes).
+- The **manifest** maps the logical name to the hashed name so a server or template can
+  resolve the cache-busted URL:
+
+```ts
+// e.g. in a server / template step
+const manifest = JSON.parse(await Deno.readTextFile("./dist/bundle.js.manifest.json"));
+const src = `/dist/${manifest["bundle.js"]}`; // -> "/dist/bundle.a1b2c3d4.js"
+// inject <script type="module" src={src}> with an immutable Cache-Control header
+```
+
+The manifest doubles as a cleanup ledger: in `--watch` mode each rebuild replaces the
+previous hashed file rather than piling up orphans. Rename the manifest with
+`--manifest <file>` (default `<outfile>.manifest.json`, namespaced to the outfile so it
+won't collide with an unrelated `manifest.json`). `--hash` is ignored with `--skip-write`
+(which writes no files) — a warning is printed to stderr.
+
 ## Library Usage
 
 You can also use `deno-build` programmatically. Every `BuildOptions` field is
@@ -139,6 +181,9 @@ const code = await build({
     outFile: "bundle.js",
     minify: true,
 });
+
+// Content hashing: writes bundle.js + bundle.<hash>.js + bundle.js.manifest.json
+await build({ minify: true, hash: true });
 
 // Get bundled code only (no file written)
 const codeOnly = await build({ skipWrite: true });
@@ -178,6 +223,11 @@ export class EntryNotFoundError extends Error { entryPath: string }
 export function build(options?: BuildOptions): Promise<string>
 export function watchAndRebuild(options?: BuildOptions): Promise<never>
 
+// Content hashing (also reusable standalone)
+export function computeContentHash(code: string, len?: number): Promise<string>
+export function insertHashIntoFileName(fileName: string, hash: string): string
+export function emitHashedOutputs(options: EmitHashedOutputsOptions): Promise<EmitHashedOutputsResult>
+
 // Utilities
 export function getPackageInfo(): Promise<PackageInfo | null>
 export function findImportMap(startDir?: string): Promise<string | undefined>
@@ -188,10 +238,12 @@ export function logStyled(stream: "out" | "err", message: string, ...styles: str
 export const timestamp: () => string
 
 // Constants
-export const DEFAULT_ROOT: string         // "src"
-export const DEFAULT_ENTRY_POINT: string  // "mod.ts"
-export const DEFAULT_OUT_FILENAME: string // "bundle.js"
-export const DEFAULT_OUT_DIR: string      // "./dist"
+export const DEFAULT_ROOT: string             // "src"
+export const DEFAULT_ENTRY_POINT: string      // "mod.ts"
+export const DEFAULT_OUT_FILENAME: string     // "bundle.js"
+export const DEFAULT_OUT_DIR: string          // "./dist"
+export const DEFAULT_HASH_LENGTH: number      // 8
+export const DEFAULT_MANIFEST_SUFFIX: string  // ".manifest.json"
 ```
 
 ### Esbuild sub-export
@@ -217,6 +269,7 @@ export function stopEsbuild(): void
 - Strict mode: optional TypeScript type checking before bundling
 - Alternative esbuild bundler with npm package support (`npm:` specifiers)
 - Output minification (works with both bundlers)
+- Optional content-hashed output + manifest for cache-busting (`--hash`)
 - Clear error messages when things go wrong, plus a typed `EntryNotFoundError`
 - Color-aware logging (strips `%c` styling when stdout isn't a terminal)
 - Stdout is reserved for the bundled code; all progress/diagnostic messages go to stderr

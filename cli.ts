@@ -1,15 +1,15 @@
 import { parseArgs } from "@std/cli/parse-args";
 import {
 	build,
-	watchAndRebuild,
-	getPackageInfo,
-	EntryNotFoundError,
-	logStyled,
 	type BuildOptions,
-	DEFAULT_ROOT,
 	DEFAULT_ENTRY_POINT,
-	DEFAULT_OUT_FILENAME,
 	DEFAULT_OUT_DIR,
+	DEFAULT_OUT_FILENAME,
+	DEFAULT_ROOT,
+	EntryNotFoundError,
+	getPackageInfo,
+	logStyled,
+	watchAndRebuild,
 } from "./src/mod.ts";
 
 function printUsage() {
@@ -28,6 +28,8 @@ Options:
   --strict, -s           Run type checking before bundling (fail on type errors)
   --esbuild, -b          Use esbuild bundler (enables npm: specifier support)
   --minify, -m           Minify the output bundle
+  --hash                 Also emit a content-hashed copy + manifest (cache-busting)
+  --manifest <file>      Manifest file name (default: "<outfile>.manifest.json")
   --skip-write, -k       Output bundled code to stdout instead of writing to file
   --help, -h             Show this help message
 
@@ -36,6 +38,7 @@ Examples:
   deno run -A jsr:@marianmeres/deno-build --root lib --entry index.ts --outfile app.js
   deno run -A jsr:@marianmeres/deno-build --outdir ./public/js --watch
   deno run -A jsr:@marianmeres/deno-build --watch --watch-dir ../shared-lib -d ../utils
+  deno run -A jsr:@marianmeres/deno-build --hash --minify
 
 Note: Automatically detects deno.json/deno.jsonc/import_map.json (walking up
 from cwd) for import resolution.
@@ -49,7 +52,7 @@ async function main() {
 	}
 
 	const args = parseArgs(Deno.args, {
-		string: ["root", "entry", "outfile", "outdir"],
+		string: ["root", "entry", "outfile", "outdir", "manifest"],
 		alias: {
 			r: "root",
 			e: "entry",
@@ -63,7 +66,7 @@ async function main() {
 			m: "minify",
 			k: "skip-write",
 		},
-		boolean: ["help", "watch", "strict", "esbuild", "minify", "skip-write"],
+		boolean: ["help", "watch", "strict", "esbuild", "minify", "skip-write", "hash"],
 		collect: ["watch-dir"],
 		default: {
 			root: DEFAULT_ROOT,
@@ -84,9 +87,20 @@ async function main() {
 		console.error(
 			"Error: --skip-write and --watch cannot be used together. " +
 				"Watch mode streams rebuilds to a file; --skip-write prints a single " +
-				"build to stdout."
+				"build to stdout.",
 		);
 		Deno.exit(2);
+	}
+
+	// --hash produces files; --skip-write produces none. Rather than error, treat
+	// it as a no-op so piping still works — just warn (on stderr) that hashing
+	// was ignored.
+	let hash = args.hash;
+	if (hash && skipWrite) {
+		console.error(
+			"Warning: --hash is ignored with --skip-write (no files are written).",
+		);
+		hash = false;
 	}
 
 	const options: BuildOptions = {
@@ -99,6 +113,8 @@ async function main() {
 		useEsbuild: args.esbuild,
 		minify: args.minify,
 		skipWrite,
+		hash,
+		manifest: args.manifest,
 	};
 
 	const code = await build(options);

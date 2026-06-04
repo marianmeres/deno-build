@@ -17,10 +17,12 @@ Machine-readable documentation for AI agents working with this codebase.
 ```
 cli.ts                 # CLI entry point (argument parsing, main(), top-level catch)
 src/
-  mod.ts               # Library entry — re-exports utils.ts + build.ts (NOT esbuild)
+  mod.ts               # Library entry — re-exports utils.ts + build.ts + hash.ts (NOT esbuild)
   build.ts             # Core build logic (build, watchAndRebuild)
+  hash.ts              # Content hashing + manifest emission (computeContentHash, emitHashedOutputs)
   esbuild-bundler.ts   # Esbuild bundler (supports npm: specifiers) — own export
   utils.ts             # Types, constants, utilities, EntryNotFoundError
+  build.test.ts        # Unit + integration tests (deno test)
 example/
   src/mod.ts           # Example entry point
   src/utils.ts         # Example utilities
@@ -57,11 +59,14 @@ consumers who never use esbuild don't pay for its startup cost.
 | `--strict` | `-s` | boolean | `false` | Run `deno check` before bundling |
 | `--esbuild` | `-b` | boolean | `false` | Use esbuild bundler |
 | `--minify` | `-m` | boolean | `false` | Minify the output bundle |
+| `--hash` | | boolean | `false` | Also emit `outfile.<hash>.js` + manifest (cache-busting) |
+| `--manifest` | | string | `"<outfile>.manifest.json"` | Manifest filename (used with `--hash`) |
 | `--skip-write` | `-k` | boolean | `false` | Print bundled code to stdout instead of writing a file |
 | `--help` | `-h` | boolean | `false` | Show help |
 
 Invalid combinations:
 - `--skip-write` + `--watch` → exit code 2 with message on stderr.
+- `--skip-write` + `--hash` → `--hash` is ignored (no files written); warning on stderr, exit 0.
 
 ### Stream contract
 
@@ -94,6 +99,9 @@ await build({
   outFile: "bundle.js",
   minify: true,
 });
+
+// Content hashing: also writes outfile.<hash>.js + a manifest (returns stable code)
+await build({ hash: true, manifest: "assets.json" });
 
 // Skip disk write, just return code
 const code = await build({ skipWrite: true });
@@ -151,7 +159,10 @@ try {
 - Otherwise: uses `@deno/emit` `bundle()`.
 - If `minify` with @deno/emit path: post-processes via `minifyCode()`.
 - If `skipWrite` is false: creates output directory and writes file.
-- Returns the bundled code as a string.
+- If `hash` (and not `skipWrite`): after writing the stable file, calls
+  `emitHashedOutputs()` to additively write `outfile.<hash>.js` + the manifest.
+  The stable file from either bundler path is left untouched.
+- Returns the bundled code as a string (unchanged by `hash`).
 - All progress/success messages go to **stderr**; errors rethrow after logging.
 
 #### `watchAndRebuild(options?: BuildOptions): Promise<never>`
@@ -161,11 +172,34 @@ try {
   while a previous one is running. If changes arrive during a rebuild, exactly
   one follow-up rebuild is queued.
 - Filters for `.ts`/`.tsx`/`.js`/`.jsx` files only.
-- **Excludes the output bundle path** from trigger events to prevent feedback loops.
+- **Excludes everything under `outDir`** (stable bundle, hashed copy, manifest)
+  from trigger events to prevent feedback loops.
 - Passes `keepEsbuildAlive: true` to `build()` so the esbuild service is reused
   across rebuilds instead of being started/stopped each time.
 - Calls `stopEsbuild()` on watcher termination (best-effort).
 - Never returns normally — throws only if the watcher itself dies.
+
+### src/hash.ts (re-exported from `./lib`)
+
+#### `computeContentHash(code: string, len = 8): Promise<string>`
+- SHA-256 of `code` (UTF-8) via Web Crypto (`crypto.subtle.digest`) — no deps.
+- Returns the first `len` lowercase hex chars (default `DEFAULT_HASH_LENGTH = 8`).
+
+#### `insertHashIntoFileName(fileName: string, hash: string): string`
+- `bundle.js` + `abc` → `bundle.abc.js`. Only the final extension is treated as
+  the extension (`bundle.min.js` → `bundle.min.abc.js`); no extension → appended.
+
+#### `emitHashedOutputs(options): Promise<EmitHashedOutputsResult>`
+- `options`: `{ outDir, outFile, manifest, code }` (all absolute except names).
+- Computes the hash, writes `outDir/<hashedName>` and the manifest
+  (`{ [outFile]: hashedName }`, pretty-printed).
+- **Ledger-based cleanup**: reads the previous manifest; if the prior hashed name
+  differs from the new one **and** matches the `name.<hex>.ext` pattern, removes
+  the stale file (ignoring `NotFound`). The pattern guard ensures only files this
+  tool produced are ever deleted. This is what keeps `--watch` from accumulating
+  orphaned hashed bundles.
+- The caller writes the stable `outFile`; this function only adds the hashed file
+  and manifest.
 
 ### src/esbuild-bundler.ts (sub-export `./esbuild`)
 
