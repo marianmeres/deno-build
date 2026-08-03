@@ -6,6 +6,7 @@
     "jsr:@deno/graph@~0.73.1": "0.73.1",
     "jsr:@luca/esbuild-deno-loader@~0.11.1": "0.11.1",
     "jsr:@marianmeres/mcp-server@*": "1.1.2",
+    "jsr:@marianmeres/release@*": "2.0.0",
     "jsr:@std/assert@0.223": "0.223.0",
     "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/bytes@0.223": "0.223.0",
@@ -60,6 +61,9 @@
       "dependencies": [
         "npm:zod@^3.24.0"
       ]
+    },
+    "@marianmeres/release@2.0.0": {
+      "integrity": "a0358067f8500edaa795f22f6f962765a7f20edd6d8869c0793f11ee02fb47c0"
     },
     "@std/assert@0.223.0": {
       "integrity": "eb8d6d879d76e1cc431205bd346ed4d88dc051c6366365b1af47034b0670be24"
