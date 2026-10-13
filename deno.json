@@ -10,7 +10,7 @@
     "test": "deno test -A",
     "build:example": "deno run -A cli.ts --root example/src --outdir example/dist",
     "build:example2": "deno run -A cli.ts --root example/src --outdir example/dist --esbuild -f bundle2.js",
-    "release": "deno run -A jsr:@marianmeres/release",
+    "release": "deno run -A jsr:@marianmeres/release@^2.1.0 --before-commit \"deno task build:example && deno task build:example2\"",
     "rp": "deno task release -y && deno publish",
     "rpm": "deno task release -y minor && deno publish"
   },
