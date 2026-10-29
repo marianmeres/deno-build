@@ -11,6 +11,9 @@ Machine-readable documentation for AI agents working with this codebase.
 - **CLI entry point**: `cli.ts`
 - **Library entry point**: `src/mod.ts`
 - **Esbuild sub-entry**: `src/esbuild-bundler.ts`
+- **Node successor**: `@marianmeres/bundle` (separate repo, npm). Same CLI flags and
+  defaults; this package stays for Deno projects. Port fixes there, not here, unless a
+  Deno consumer needs them.
 
 ## Architecture
 

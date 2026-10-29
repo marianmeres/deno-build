@@ -3,6 +3,10 @@
 A quick-and-dirty CLI tool and library to bundle Deno TypeScript sources into vanilla
 JavaScript for browser use.
 
+> **Node projects:** use [`@marianmeres/bundle`](https://www.npmjs.com/package/@marianmeres/bundle)
+> (`npx @marianmeres/bundle`), the Node port of this tool with the same flags and
+> defaults. `deno-build` remains the tool for Deno projects.
+
 ## Motivation
 
 When prototyping web applications, I often write utility modules in Deno/TypeScript
